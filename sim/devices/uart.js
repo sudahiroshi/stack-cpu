@@ -61,6 +61,11 @@ export class Uart {
     return e;
   }
 
+  /** 送信中か（送信FIFOか送信中のバイトがある） */
+  get transmitting() {
+    return this.txShift !== null || this.txFifo.length > 0;
+  }
+
   /** 受信データが今後届く見込みがあるか、送信FIFOが空く見込みがあるか（待機の判定用） */
   get pendingEvents() {
     let e = 0;

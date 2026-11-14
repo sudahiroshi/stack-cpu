@@ -258,7 +258,8 @@ export class Machine {
         const t = this.#nextIssueCycle();
         if (t > this.cycle) this.cycle = Math.min(t, this.nextDeviceCycle, end);
       } else {
-        if (!this.#anyDeviceMayWake()) return 'stopped';
+        // スレッドを起こす見込みがなく、UARTの送信も終わっていれば止まった（送信中なら出し終えるまで進める）
+        if (!this.#anyDeviceMayWake() && !this.uart.transmitting) return 'stopped';
         this.cycle = Math.max(this.cycle, Math.min(this.nextDeviceCycle, end));
       }
       if (this.cycle >= end) return 'limit';
@@ -267,9 +268,12 @@ export class Machine {
     return this.breakReason ? 'break' : 'step';
   }
 
-  /** nサイクル進める */
+  /** nサイクル進める（breakHook で止まったら、そこで抜ける） */
   run(n) {
-    for (let i = 0; i < n; i++) this.step();
+    for (let i = 0; i < n; i++) {
+      this.step();
+      if (this.breakReason) break;
+    }
   }
 
   /** 動いているスレッドが次に発行できる最も早いサイクル（いまのサイクルで発行できればいまのサイクル） */
@@ -290,7 +294,7 @@ export class Machine {
    * 止まっていないスレッドがなくなるまで（または maxCycles サイクルまで）進める。
    * 待機中で、他のスレッドもデバイスも起こす見込みのないスレッドは止まっているとみなす。
    * @returns {{ cycles: number, stopped: boolean, blocked: number[] }}
-   *   stopped：すべて止まったか（動けるスレッドがなく、デバイスが起こす見込みもない）。
+   *   stopped：すべて止まったか（動けるスレッドがなく、デバイスが起こす見込みもなく、UARTの送信も終わった）。
    *   maxCycles で打ち切ったときは false。blocked：待機中のスレッドのtid
    */
   runUntilStop(maxCycles = 10_000_000) {
@@ -301,7 +305,7 @@ export class Machine {
       if (r !== 'step') break;
     }
     const blocked = this.threads.filter(th => [S.WAIT, S.RECV, S.SEND].includes(th.state)).map(th => th.tid);
-    return { cycles: this.cycle - start, stopped: !this.running && !this.#anyDeviceMayWake(), blocked };
+    return { cycles: this.cycle - start, stopped: !this.running && !this.#anyDeviceMayWake() && !this.uart.transmitting, blocked };
   }
 
   /** 経過時間（マイクロ秒、仮想時間） */

@@ -13,14 +13,23 @@ const types = {
   '.bin': 'application/octet-stream', '.png': 'image/png',
 };
 
+const redirect = (res, location) => { res.writeHead(302, { Location: location }); res.end(); };
+
 createServer(async (req, res) => {
   try {
-    let path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    const url = new URL(req.url, 'http://x');
+    const path = normalize(decodeURIComponent(url.pathname));
+    if (path === '/') return redirect(res, '/ui/');
     let file = join(root, path);
     if (!file.startsWith(root)) throw new Error('forbidden');
-    if ((await stat(file)).isDirectory()) file = join(file, 'index.html');
+    if ((await stat(file)).isDirectory()) {
+      // 最後に / がないと、ページの中の相対パス（main.js など）が1つ上のフォルダーを指してしまうので、/ を付けて転送する
+      if (!url.pathname.endsWith('/')) return redirect(res, `${url.pathname}/${url.search}`);
+      file = join(file, 'index.html');
+    }
     const body = await readFile(file);
-    res.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream' });
+    // 開発用なので、古いファイルがブラウザに残らないようにキャッシュさせない
+    res.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(body);
   } catch {
     res.writeHead(404); res.end('not found');

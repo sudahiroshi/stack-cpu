@@ -89,8 +89,9 @@ test('UART：割り当てのないオフセットはバスエラー、8bitアク
 test('examples/03_uart_puts.asm：UARTに "Hello, world!" を出す', () => {
   const r = run(example('03_uart_puts.asm'));
   assert.equal(r.exc, null);
-  r.m.run(20 * T9K);
+  // スレッドが止まっても、UARTの送信を出し終えるまで進める
   assert.equal(r.m.uart.outputText, 'Hello, world!\r\n');
+  assert.equal(r.m.uart.transmitting, false);
 });
 
 // ---------------------------------------------------------------- タイマ

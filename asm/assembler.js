@@ -366,7 +366,8 @@ function parseDataItems(operand, unit) {
  *   useSlot6: slot6にNOP以外（RET、+、DUP）を詰めるか（既定true）
  *   style: リスティングの逆アセンブル表記（既定 'reg'）
  * @returns {{ bytes: Uint8Array, words: number[], origin: number, symbols: Map<string, number>,
- *             listing: string, warnings: string[] }}
+ *             labels: Map<string, number>, listing: string, warnings: string[], layout: object[] }}
+ *   symbols：ラベルとEQUの値、labels：ラベルだけ、layout：配置の情報（makeLayout）
  * @throws {AsmError}
  */
 export function assemble(source, options = {}) {
@@ -590,8 +591,27 @@ export function assemble(source, options = {}) {
 
   return {
     bytes, words, origin: L.start, symbols, warnings,
+    labels: new Map(labels),
     listing: makeListing(L, lines, bytes, options.style ?? 'reg'),
+    layout: makeLayout(L, lines),
   };
+}
+
+/**
+ * 配置の情報（UIの逆アセンブルの表示用）。番地の小さい順。
+ *   { addr, kind: 'inst', source }  命令語（source はその語に詰めたソースの行の文字列の配列）
+ *   { addr, kind: 'lit' }            LIT・PCRELの定数語
+ *   { addr, kind: 'data', size, source }  DC.B・DC.L
+ */
+function makeLayout(L, lines) {
+  const src = ln => lines[ln - 1].replace(/;.*$/, '').trim();
+  const out = [];
+  for (const w of L.words) {
+    out.push({ addr: w.addr, kind: 'inst', source: w.lines.map(src) });
+    w.lits.forEach((_, k) => out.push({ addr: w.addr + 4 * (k + 1), kind: 'lit' }));
+  }
+  for (const d of L.datas) out.push({ addr: d.addr, kind: 'data', size: d.item.size, source: [src(d.item.line)] });
+  return out.sort((a, b) => a.addr - b.addr);
 }
 
 /** 配置：語・定数語・データの番地を決める */

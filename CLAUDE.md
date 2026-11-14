@@ -46,7 +46,7 @@ asm/         アセンブラ（DOM非依存）
   mnemonics.js Forth風・レジスタ風の名前の対応表とマクロ
   assembler.js アセンブラ本体
   disasm.js    逆アセンブラ
-ui/          ブラウザのUI（index.html、style.css、main.js）
+ui/          ブラウザのUI（index.html、style.css、main.js＝DOMの操作、session.js・views.js＝DOM非依存の状態とHTMLの組み立て）
 test/        テスト（node --test）
 examples/    サンプルプログラム（.asm）
 rom/         ブートROMのソース

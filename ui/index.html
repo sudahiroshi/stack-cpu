@@ -2,24 +2,133 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>スタックマシンCPU シミュレータ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stack CPU シミュレータ</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- 雛形。画面（UI）の仕様はまだ決まっていない。決まってから作り込む。 -->
-  <header>
-    <h1>スタックマシンCPU シミュレータ</h1>
-    <span id="status">準備中</span>
+  <!-- 画面の仕様：docs/ui.md -->
+  <header class="toolbar">
+    <strong class="brand">Stack CPU</strong>
+    <button id="btn-open" title="ファイル（.asm・.bin・.hex）を開く">開く…</button>
+    <input id="file-input" type="file" accept=".asm,.s,.bin,.hex,.mem" hidden>
+    <label>機種
+      <select id="sel-config"><option value="9K">9K</option><option value="20K">20K</option></select>
+    </label>
+    <button id="btn-reset" title="リセットして、最後に読み込んだファイルを読み込み直す">リセット</button>
+    <span class="sep"></span>
+    <button id="btn-run" class="primary" title="実行／停止（F5）">▶ 実行</button>
+    <span class="group" role="group" aria-label="ステップ">
+      <button id="btn-step-inst" title="選んだスレッドの1命令（F10）">1命令</button>
+      <button id="btn-step-word" title="選んだスレッドの1語">1語</button>
+      <button id="btn-step-over" title="CALL・EXECを飛ばす（F11）">飛ばす</button>
+      <button id="btn-step-cycle" title="全体の1サイクル">1サイクル</button>
+    </span>
+    <span class="sep"></span>
+    <label>速さ
+      <select id="sel-speed">
+        <option value="real">実時間</option>
+        <option value="max">最高速</option>
+        <option value="slow">ゆっくり</option>
+      </select>
+    </label>
+    <label id="slow-rate-label" hidden><input id="slow-rate" type="number" min="1" max="1000" value="10"> 命令/秒</label>
+    <label>表記
+      <select id="sel-style"><option value="reg">レジスタ風</option><option value="forth">Forth風</option></select>
+    </label>
+    <span class="group" role="group" aria-label="表示">
+      <button id="btn-view-list" class="toggle">一覧＋詳細</button>
+      <button id="btn-view-grid" class="toggle">格子</button>
+    </span>
   </header>
-  <main>
-    <section class="screen">
-      <canvas id="screen" width="640" height="480"></canvas>
-    </section>
-    <section class="panel">
+
+  <div class="statusbar" id="status">
+    <span id="st-program">（プログラムなし）</span>
+    <span>サイクル <b id="st-cycle">0</b></span>
+    <span>仮想時間 <b id="st-time">0</b> µs</span>
+    <span id="st-lag" class="warn" hidden>実時間に追いついていません</span>
+    <span id="st-reason"></span>
+  </div>
+
+  <main class="layout">
+    <section class="pane threads-pane" id="pane-list">
       <h2>スレッド</h2>
-      <pre id="threads">（段階2以降で表示）</pre>
+      <div id="thread-list"></div>
+    </section>
+
+    <section class="pane center-pane">
+      <div id="details" class="details"></div>
+      <div id="grid" class="grid" hidden></div>
+    </section>
+
+    <section class="pane side-pane">
+      <div class="tabs" data-tabs="right">
+        <nav>
+          <button data-tab="screen" class="active">画面</button>
+          <button data-tab="uart">UART</button>
+        </nav>
+        <div class="tab-body" data-tab="screen">
+          <div class="screen-tools">
+            <label>倍率
+              <select id="sel-scale"><option value="fit">合わせる</option><option value="1">1倍</option><option value="0.5">0.5倍</option></select>
+            </label>
+            <span class="hint">画面をクリックすると、キーがジョイパッドになります（矢印・Z＝A・X＝B・Shift＝SELECT・Enter＝START）</span>
+          </div>
+          <div class="screen-wrap"><canvas id="screen" width="640" height="480" tabindex="0" aria-label="テキスト画面"></canvas></div>
+          <div class="joypad" id="joypad"></div>
+        </div>
+        <div class="tab-body" data-tab="uart" hidden>
+          <div class="screen-tools">
+            <button id="btn-uart-clear">消去</button>
+            <span class="hint">端末をクリックすると、キー入力をUARTへ送ります</span>
+          </div>
+          <pre id="uart" class="uart" tabindex="0" aria-label="UARTの端末"></pre>
+        </div>
+      </div>
+
+      <div class="tabs" data-tabs="bottom">
+        <nav>
+          <button data-tab="memory" class="active">メモリ</button>
+          <button data-tab="csr">CSR</button>
+          <button data-tab="mbox">メールボックス</button>
+          <button data-tab="bp">BP</button>
+          <button data-tab="log">ログ</button>
+        </nav>
+        <div class="tab-body" data-tab="memory">
+          <div class="screen-tools">
+            <label>番地 <input id="mem-addr" value="00100000" size="10"></label>
+            <select id="mem-unit"><option value="4">語</option><option value="1">バイト</option></select>
+          </div>
+          <div id="memory"></div>
+        </div>
+        <div class="tab-body" data-tab="csr" hidden><div id="csr"></div></div>
+        <div class="tab-body" data-tab="mbox" hidden><div id="mbox"></div></div>
+        <div class="tab-body" data-tab="bp" hidden><div id="bp"></div></div>
+        <div class="tab-body" data-tab="log" hidden><pre id="log" class="log"></pre></div>
+      </div>
     </section>
   </main>
+
+  <dialog id="load-dialog">
+    <form method="dialog" id="load-form">
+      <h2>プログラムを読み込む</h2>
+      <p><b id="ld-name"></b>（<span id="ld-kind"></span>）</p>
+      <p id="ld-addr-row"><label>読み込む番地 <input id="ld-addr" value="00100000" size="10"></label></p>
+      <p id="ld-asm-note" class="hint" hidden>.asm は ORG の番地（なければ 00100000）に読み込みます。</p>
+      <fieldset>
+        <legend>起動の仕方</legend>
+        <label><input type="radio" name="boot" value="boot" checked> ブートROMから起動（00100000 に置いてリセットから）</label><br>
+        <label><input type="radio" name="boot" value="direct"> tid 0 で直接実行（ブートROMの起動を飛ばす）</label>
+        <p id="ld-up-row"><label>UP <input id="ld-up" value="00105F80" size="10"></label></p>
+      </fieldset>
+      <pre id="ld-msg" class="msg" hidden></pre>
+      <menu>
+        <button value="cancel" formnovalidate>やめる</button>
+        <button id="ld-ok" value="ok" class="primary">読み込む</button>
+      </menu>
+    </form>
+  </dialog>
+
   <script type="module" src="main.js"></script>
 </body>
 </html>

@@ -154,7 +154,11 @@
 - `sim/` と `asm/` はDOMに依存しないまま使う。ステップ実行とブレークポイントの仕組みは、DOMに依存しない `sim/debugger.js` に作り、Node.jsでテストする。
 - `ui/` は表示と操作だけを受け持つ。外部ライブラリは使わない（CLAUDE.md）。
 - 表示の更新は、実行中は描画の周期（requestAnimationFrame）ごと、止まったときは全部。
-- 表示の設定（表記、配置、速さ、ピン）は、ブラウザに覚えさせてもよい（localStorage）。
+- 表示の設定（表記、配置、速さ、倍率、機種）は、ブラウザに覚えさせる（localStorage）。
+- 状態と表示用のデータは `ui/session.js`、HTMLの組み立ては `ui/views.js`（どちらもDOM非依存でNode.jsでテストする）、DOMの操作は `ui/main.js`。
+- ブラウザのコンソールから操作するための口 `window.stackcpu` を用意する（デバッグの補助）：
+  `stackcpu.openFile(名前, 中身)`（読み込みの画面を開く）、`stackcpu.loadText(名前, ソース, { boot, addr, up })`、`stackcpu.session`。
+- ショートカット：F5＝実行／停止、F10＝1命令、F11＝飛ばす（入力欄・UART端末・画面にフォーカスがないとき）。
 
 ## 11. 当面作らないもの
 
