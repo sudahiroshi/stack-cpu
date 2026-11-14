@@ -28,7 +28,7 @@ Tang Nano（9K／20K）向けに設計中の、オリジナルの32bitスタッ�
 ## ディレクトリの構成
 
 ```
-docs/        spec.md（仕様書）、decisions.md（決定の記録）
+docs/        spec.md（仕様書）、decisions.md（決定の記録）、plan.md（実装計画）、todo.md（人間が決めること）
 sim/         シミュレータ本体（DOM非依存）
   isa.js       命令の番号、スタック効果、例外番号、CSR番号、メモリマップなどの定数
   config.js    機種ごとの構成（9K、20K）
