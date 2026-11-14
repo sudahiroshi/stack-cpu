@@ -324,3 +324,37 @@ test('examples/05_sleep_joy.asm を START で一般モードで起動し、Aボ�
   assert.equal(r.t(1).state, S.RECV);                       // EXIT で idle に戻った
   assert.ok(r.m.timer.counter >= 16_667);
 });
+
+// ---------------------------------------------------------------- examples/07_adder.asm
+
+test('examples/07_adder.asm：UARTから受け取った数字を足し、合計をUARTと画面の両方に出す（数字以外は無視）', () => {
+  const r = boot({ os: example('07_adder.asm'), setup: m => m.uart.receive('3x45') });
+  assert.equal(r.out, `${WELCOME}Adder: type digits 0-9\r\n+3 = 3\r\n+4 = 7\r\n+5 = 12\r\n`);
+  const v = r.m.video;
+  assert.deepEqual([0, 1, 2, 3].map(i => v.textRow(i).trimEnd()), ['Adder: type digits 0-9', '+3 = 3', '+4 = 7', '+5 = 12']);
+  assert.equal(v.cursor, 4 << 8);              // カーソルは次の行の先頭
+  assert.equal(r.t(0).state, S.WAIT);          // 次の入力を待っている
+});
+
+test('examples/07_adder.asm：除算器のない構成でも同じ（U/MOD はブートROMがソフトで実行する）', () => {
+  const r = boot({ os: example('07_adder.asm'), config: makeConfig('9K', { features: 0 }), setup: m => m.uart.receive('987') });
+  assert.equal(r.out, `${WELCOME}Adder: type digits 0-9\r\n+9 = 9\r\n+8 = 17\r\n+7 = 24\r\n`);
+});
+
+test('examples/07_adder.asm：30行を超えたら SCROLL で画面を送り、最新の行が画面の下に来る', () => {
+  const r = boot({ os: example('07_adder.asm') });
+  // 1文字ずつ、表示を終えて次の入力を待つまで進めてから入力する
+  // （一度に入力すると、表示が受信に追いつかず受信FIFO（16バイト）があふれる。実機と同じ）
+  for (let i = 0; i < 40; i++) {
+    r.m.uart.receive('9');
+    r.m.runUntilStop(5_000_000);
+  }
+  r.out = r.m.uart.outputText;
+  const v = r.m.video;
+  // 案内の1行＋40行。いまの行（空き）は 41 mod 30 ＝ 11、最後に書いた行は10
+  assert.equal(v.textRow(10).trimEnd(), '+9 = 360');
+  assert.equal(v.textRow(11).trim(), '');
+  assert.equal(v.scroll, 12);                  // 画面の最下行（29）＝VRAMの11行目
+  assert.equal(v.cursor, 11 << 8);
+  assert.match(r.out, /\+9 = 360\r\n$/);
+});

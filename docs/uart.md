@@ -225,6 +225,7 @@ start:  PUSHQ #2
 ```
 
 文字列を送る例は `examples/06_start.asm` の `tputs`。
+受け取った数字の合計をUARTとテキスト画面の両方に出す例は `examples/07_adder.asm`。
 
 ### 4.2 レジスタを直接使う（特権モードだけ）
 
