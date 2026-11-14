@@ -37,6 +37,8 @@ export class Memory {
     this.devices = [];
     /** 保護キー表（sim/devices/keytable.js）。Machine が登録する。一般モードのアクセスの判定に使う */
     this.keytable = null;
+    /** デバッガのフック：CPUからのデータの書き込みのあとに呼ぶ（addr, size, ctx）。load() では呼ばない */
+    this.onWrite = null;
   }
 
   /** I/Oデバイスを登録する */
@@ -128,8 +130,9 @@ export class Memory {
   write32(addr, value, ctx = {}) {
     Memory.#align(addr);
     const r = this.#access(addr, 'w', ctx);
-    if (r.kind === 'io') { r.dev.write32(r.off, value >>> 0, { ...ctx, addr: addr >>> 0 }); return; }
-    put32(r.buf, r.off, value);
+    if (r.kind === 'io') r.dev.write32(r.off, value >>> 0, { ...ctx, addr: addr >>> 0 });
+    else put32(r.buf, r.off, value);
+    this.onWrite?.(addr >>> 0, 4, ctx);
   }
 
   /** 8bitの読み出し（ゼロ拡張） */
@@ -148,9 +151,10 @@ export class Memory {
     if (r.kind === 'io') {
       if (!r.dev.write8) throw new CpuException(EXC.ALIGN, addr); // T-16
       r.dev.write8(r.off, value & 0xff, { ...ctx, addr: addr >>> 0 });
-      return;
+    } else {
+      r.buf[r.off] = value & 0xff;
     }
-    r.buf[r.off] = value & 0xff;
+    this.onWrite?.(addr >>> 0, 1, ctx);
   }
 
   /**

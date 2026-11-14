@@ -59,12 +59,23 @@ export class Machine {
     /** 時間で動くデバイス（update(cycle) を持つもの） */
     this.timedDevices = [this.uart, this.timer, this.video];
     this.listeners = new Set(); // UIやトレース用のフック。イベント：{ type: 'exec' | 'block' | 'exception', ... }
+    /**
+     * デバッガのフック：スレッドが語を実行し始める直前に呼ぶ。止める理由（真）を返すと、発行せずに step() を抜ける。
+     * そのサイクルの残り（後のコア）は、次の step() で続ける（止めない実行と結果が変わらないように）。
+     * @type {null | ((th: Thread) => any)}
+     */
+    this.breakHook = null;
+    /** デバッガのフック：例外の入口の処理（または二重例外での停止）のあとに呼ぶ（th, 例外番号） */
+    this.exceptionHook = null;
     this.reset();
   }
 
   /** リセット（11.1節）。メモリの中身は消さない。全スレッドが同時に同じ番地から始まる */
   reset() {
     this.cycle = 0; // 仮想時間（サイクル数）
+    this.resumeCore = 0;   // 途中で止めたサイクルを、どのコアから続けるか（デバッガ）
+    this.lastIssue = [];   // 直前のサイクルに発行したスレッド
+    this.breakReason = null;
     for (const th of this.threads) th.reset();
     this.keytable.reset(); // 全ページがキー0（11.1節）
     for (const d of [this.uart, this.timer, this.gpio, this.video, this.threadControl, this.userPage]) d.reset();
@@ -184,22 +195,27 @@ export class Machine {
     return this.cycle >= th.readyCycle && this.isActive(th);
   }
 
-  /** 1つのコアを1サイクル進める。発行したスレッドを返す（空サイクルなら null） */
-  #stepCore(core) {
+  /** このサイクルにそのコアで発行するスレッドを選ぶ（状態は変えない）。いなければ null */
+  #pick(core) {
     const n = core.threads.length;
     for (let k = 1; k <= n; k++) {
       const i = (core.last + k) % n;
-      const th = core.threads[i];
-      if (!this.#ready(th)) continue;
-      core.last = i;
-      th.state = S.RUNNING;
-      issue(this, th);
-      const next = this.cycle + this.cfg.pipelineDepth;
-      th.readyCycle = Math.max(next, th.busyUntil);
-      if (th.state === S.RUNNING && th.readyCycle > next) th.state = S.PARKED; // 外部RAM・除算の完了待ち
-      return th;
+      if (this.#ready(core.threads[i])) return i;
     }
     return null;
+  }
+
+  /** 1つのコアで、選んだスレッド（添字 i）に1命令を発行する。発行したスレッドを返す（空サイクルなら null） */
+  #stepCore(core, i) {
+    if (i === null) return null;
+    const th = core.threads[i];
+    core.last = i;
+    th.state = S.RUNNING;
+    issue(this, th);
+    const next = this.cycle + this.cfg.pipelineDepth;
+    th.readyCycle = Math.max(next, th.busyUntil);
+    if (th.state === S.RUNNING && th.readyCycle > next) th.state = S.PARKED; // 外部RAM・除算の完了待ち
+    return th;
   }
 
   /**
@@ -207,11 +223,48 @@ export class Machine {
    * @returns {boolean} どれかのコアで命令を発行したか
    */
   step() {
-    if (this.cycle >= this.nextDeviceCycle) this.#updateDevices();
-    let issued = false;
-    for (const core of this.cores) if (this.#stepCore(core)) issued = true;
+    if (this.resumeCore === 0 && this.cycle >= this.nextDeviceCycle) this.#updateDevices();
+    if (this.resumeCore === 0) this.lastIssue = [];
+    for (let c = this.resumeCore; c < this.cores.length; c++) {
+      const core = this.cores[c];
+      const i = this.#pick(core);
+      // デバッガ：語を実行し始める直前のスレッドで止めるか（止めるなら、このサイクルの残りは後で続ける）
+      if (i !== null && this.breakHook) {
+        const th = core.threads[i];
+        const reason = th.dec === null ? this.breakHook(th) : null;
+        if (reason) {
+          this.resumeCore = c;
+          this.breakReason = reason;
+          return false;
+        }
+      }
+      const th = this.#stepCore(core, i);
+      if (th) this.lastIssue.push(th);
+    }
+    this.resumeCore = 0;
     this.cycle++;
-    return issued;
+    return this.lastIssue.length > 0;
+  }
+
+  /**
+   * 早送りしながら1サイクル進める（runUntilStop の1回分）。発行できるスレッドがなければ、
+   * 次に発行できるサイクルかデバイスの出来事まで（end を超えない範囲で）時間を進めてから1サイクル進める。
+   * @returns {'step' | 'break' | 'stopped' | 'limit'}
+   *   step：進めた、break：breakHook で止まった（breakReason）、stopped：すべて止まった、limit：end に達した
+   */
+  stepFast(end = Infinity) {
+    if (this.resumeCore === 0) {
+      if (this.running) {
+        const t = this.#nextIssueCycle();
+        if (t > this.cycle) this.cycle = Math.min(t, this.nextDeviceCycle, end);
+      } else {
+        if (!this.#anyDeviceMayWake()) return 'stopped';
+        this.cycle = Math.max(this.cycle, Math.min(this.nextDeviceCycle, end));
+      }
+      if (this.cycle >= end) return 'limit';
+    }
+    this.step();
+    return this.breakReason ? 'break' : 'step';
   }
 
   /** nサイクル進める */
@@ -244,18 +297,8 @@ export class Machine {
     const start = this.cycle;
     const end = start + maxCycles;
     while (this.cycle < end) {
-      if (this.running) {
-        // 発行できるスレッドがなければ、次に発行できるサイクルかデバイスの出来事まで早送りする
-        const t = this.#nextIssueCycle();
-        if (t > this.cycle) this.cycle = Math.min(t, this.nextDeviceCycle, end);
-        if (this.cycle >= end) break;
-        this.step();
-        continue;
-      }
-      if (!this.#anyDeviceMayWake()) break;
-      this.cycle = Math.max(this.cycle, Math.min(this.nextDeviceCycle, end));
-      if (this.cycle >= end) break;
-      this.step();
+      const r = this.stepFast(end);
+      if (r !== 'step') break;
     }
     const blocked = this.threads.filter(th => [S.WAIT, S.RECV, S.SEND].includes(th.state)).map(th => th.tid);
     return { cycles: this.cycle - start, stopped: !this.running && !this.#anyDeviceMayWake(), blocked };

@@ -38,6 +38,7 @@ sim/         シミュレータ本体（DOM非依存）
   thread.js    スレッドごとの状態（スタック、CSR、命令語バッファ）
   core.js      フェッチ時の判定と命令の実行
   decode.js    命令語のデコードと配置規則の検査（アセンブラと共有）
+  debugger.js  ステップ実行とブレークポイント（UIから使う）
   cpu-exception.js  CPUの例外を内部で伝える例外クラス
   devices/     uart.js、timer.js、gpio.js（GPIO・ユーザーページ・スレッドの制御）、video.js（画面・VRAM・フォント）、
                font8x16.js（自作フォント）、keytable.js（保護キー表）、registers.js（I/Oのオフセット）

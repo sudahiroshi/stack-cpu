@@ -76,6 +76,7 @@ export function raise(m, th, exc, { slot = 0, addr = 0, wordAddr, word = 0, resu
     th.state = THREAD_STATE.DOUBLE_FAULT;
     th.inEntry = false;
     m.emit({ type: 'exception', tid: th.tid, ...th.lastException });
+    m.exceptionHook?.(th, th.lastException.exc);
     return;
   }
   th.rs[th.rdepth++] = ((ret & ~3) | (th.mode & 1)) >>> 0;
@@ -84,6 +85,7 @@ export function raise(m, th, exc, { slot = 0, addr = 0, wordAddr, word = 0, resu
   th.inEntry = true;    // ベクタ先の語のフェッチが終わるまで
   th.depthSet = false;  // ハンドラの最初の語では、始める時点の深さを判定しない（T-90）
   m.emit({ type: 'exception', tid: th.tid, ...th.lastException });
+  m.exceptionHook?.(th, th.lastException.exc);
 }
 
 /**
