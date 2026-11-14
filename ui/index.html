@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>スタックマシンCPU シミュレータ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 雛形。画面（UI）の仕様はまだ決まっていない。決まってから作り込む。 -->
+  <header>
+    <h1>スタックマシンCPU シミュレータ</h1>
+    <span id="status">準備中</span>
+  </header>
+  <main>
+    <section class="screen">
+      <canvas id="screen" width="640" height="480"></canvas>
+    </section>
+    <section class="panel">
+      <h2>スレッド</h2>
+      <pre id="threads">（段階2以降で表示）</pre>
+    </section>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

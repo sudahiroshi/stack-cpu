@@ -1,0 +1,8 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; }
+header { display: flex; gap: 1rem; align-items: baseline; padding: 0.5rem 1rem; border-bottom: 1px solid #8884; }
+header h1 { font-size: 1.1rem; margin: 0; }
+main { display: flex; gap: 1rem; padding: 1rem; flex-wrap: wrap; }
+canvas#screen { background: #000; image-rendering: pixelated; width: 640px; height: 480px; }
+.panel { min-width: 20rem; }
+pre { font-family: ui-monospace, monospace; font-size: 0.85rem; }

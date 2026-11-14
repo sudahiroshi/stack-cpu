@@ -1,0 +1,13 @@
+{
+  "name": "stack-cpu-sim",
+  "version": "0.0.1",
+  "description": "Tang Nano向けスタックマシンCPU（バレル方式）の命令セットシミュレータとアセンブラ",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "asm": "node tools/asm.js",
+    "serve": "node tools/serve.js"
+  }
+}
