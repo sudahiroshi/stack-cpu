@@ -46,11 +46,11 @@ test('load は領域をまたいでも書け、ROMにも書ける。I/Oと割り
 
 test('fetch32 は自コアのローカルとROMだけ', () => {
   const m = new Memory(makeConfig('20K'));
-  assert.equal(m.fetch32(0x0010_0000, 0), 0);
-  assert.equal(m.fetch32(0xFFFF_0000, 1), 0);
-  assert.equal(excOf(() => m.fetch32(0x0011_0000, 0)), EXC.FETCH);
-  assert.equal(excOf(() => m.fetch32(0x0100_0000, 0)), EXC.FETCH);
-  assert.equal(excOf(() => m.fetch32(0x0010_0002, 0)), EXC.ALIGN);
+  assert.equal(m.fetch32(0x0010_0000, { core: 0 }), 0);
+  assert.equal(m.fetch32(0xFFFF_0000, { core: 1 }), 0);
+  assert.equal(excOf(() => m.fetch32(0x0011_0000, { core: 0 })), EXC.FETCH);
+  assert.equal(excOf(() => m.fetch32(0x0100_0000, { core: 0 })), EXC.FETCH);
+  assert.equal(excOf(() => m.fetch32(0x0010_0002, { core: 0 })), EXC.ALIGN);
 });
 
 test('デバイスの登録：重なりとI/O領域の外はエラー', () => {

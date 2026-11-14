@@ -7,7 +7,8 @@
 //   例外7（フェッチ違反）、4（不正命令、存在しないCSR、読み出し専用のCSRへのCSR!）、5（配置違反）、
 //   6（特権違反）、0〜3（スタック深さ）、9（BRK）。同時に起きたときはこの順（T-32）。
 //
-// 段階2では、例外が起きたら記録してスレッドを止める（raise）。例外の入口は段階4で作る。
+// 例外（7.3節）：raise が例外の入口の処理をする。戻り先（bit0＝モード）をリターンスタックに積み、
+// 特権モードにして VBR＋番号×4 へ移る。入口の処理中にさらに例外が起きたら二重例外（T-31）。
 //
 // 待機（段階3）：WAIT・RECV・SENDM は、続けられないときスタックを変えずに BLOCK を返し、
 // スレッドを待機状態（THREADSTAT 2〜4）にする。起きる条件が成り立ったら、スケジューラが同じ命令をもう一度実行する。
@@ -43,10 +44,19 @@ export function stackEffect(inst) {
   return { pop: o.pop, push: o.push, rpop: o.rpop ?? 0, rpush: o.rpush ?? 0 };
 }
 
+/** メモリのアクセスに渡す情報（モードとキーの集合） */
+function memCtx(th) {
+  return { core: th.core, tid: th.tid, mode: th.mode, pkread: th.pkread, pkwrite: th.pkwrite };
+}
+
 /**
- * 例外を起こす。段階2の仮の扱い：CSRに記録してスレッドを止める。
+ * 例外を起こす（7.3節）。
+ * ECAUSE・EPC・EIR・ESLOT・EADDRを記録し、戻り先（語のバイトアドレス、bit0＝現在のモード）を
+ * リターンスタックに積んで（レッドゾーンを使ってよい。深さの判定の対象外）、特権モードで VBR＋番号×4 へ移る。
+ * 次の場合は二重例外（例外15。T-31）：入口でリターンスタックに積めない、
+ * またはベクタ先の語のフェッチ（フェッチ時の判定を含む）で例外になった。スレッドを止める（THREADSTAT 7）。
  * @param {object} info { slot, addr, wordAddr, word, resumeAddr }
- *   resumeAddr：再開する番地（語の先頭、または例外8・18では次の語）。段階4の入口で使う
+ *   resumeAddr：戻り先（再開できる例外は語の先頭、例外8・18は次の語）
  */
 export function raise(m, th, exc, { slot = 0, addr = 0, wordAddr, word = 0, resumeAddr }) {
   th.ecause = exc;
@@ -54,13 +64,25 @@ export function raise(m, th, exc, { slot = 0, addr = 0, wordAddr, word = 0, resu
   th.eir = word >>> 0;
   th.eslot = slot;
   th.eaddr = addr >>> 0;
-  th.lastException = {
-    exc, epc: th.epc, eir: th.eir, eslot: slot, eaddr: th.eaddr,
-    resumeAddr: (resumeAddr ?? wordAddr) >>> 0, mode: th.mode,
-  };
-  // TODO(段階4): 戻り先をリターンスタックに積み、特権モードにして VBR＋番号×4 へ
-  th.state = THREAD_STATE.HALT;
+  const ret = (resumeAddr ?? wordAddr) >>> 0;
+  th.lastException = { exc, epc: th.epc, eir: th.eir, eslot: slot, eaddr: th.eaddr, resumeAddr: ret, mode: th.mode };
   th.dec = null;
+
+  // リターンスタックの物理的な段数（容量＋レッドゾーン3段）を使い切っている、または深さが負（RP!で設定）なら積めない（TODO(T-89)）
+  const cannotPush = th.rdepth < 0 || th.rdepth >= th.rs.length;
+  if (th.inEntry || cannotPush) {
+    th.ecause = EXC.DOUBLE;
+    th.lastException = { ...th.lastException, exc: EXC.DOUBLE, cause: exc };
+    th.state = THREAD_STATE.DOUBLE_FAULT;
+    th.inEntry = false;
+    m.emit({ type: 'exception', tid: th.tid, ...th.lastException });
+    return;
+  }
+  th.rs[th.rdepth++] = ((ret & ~3) | (th.mode & 1)) >>> 0;
+  th.mode = 1;
+  th.pc = (th.vbr + exc * 4) >>> 0;
+  th.inEntry = true;    // ベクタ先の語のフェッチが終わるまで
+  th.depthSet = false;  // ハンドラの最初の語では、始める時点の深さを判定しない（TODO(T-90)）
   m.emit({ type: 'exception', tid: th.tid, ...th.lastException });
 }
 
@@ -72,7 +94,7 @@ function fetch(m, th) {
   const addr = th.pc;
   let word;
   try {
-    word = m.mem.fetch32(addr, th.core);
+    word = m.mem.fetch32(addr, memCtx(th));
   } catch (e) {
     if (!(e instanceof CpuException)) throw e;
     raise(m, th, e.exc, { slot: 0, addr: e.addr, wordAddr: addr });
@@ -108,6 +130,8 @@ function fetch(m, th) {
   th.idx = 0;
   th.litPtr = addr + 4;
   th.nextPc = addr + 4 + 4 * dec.litCount;
+  th.inEntry = false; // ベクタ先の語のフェッチが終わった
+  th.depthSet = false;
   return true;
 }
 
@@ -119,16 +143,22 @@ function depthFaults(th, insts) {
   const found = new Map();
   const note = (exc, slot) => { if (!found.has(exc)) found.set(exc, { exc, slot }); };
   let d = th.depth, r = th.rdepth;
-  if (d > th.dcap) note(EXC.DSTACK_OVER, 0);
-  if (d < 0) note(EXC.DSTACK_UNDER, 0);
-  if (r > th.rcap) note(EXC.RSTACK_OVER, 0);
-  if (r < 0) note(EXC.RSTACK_UNDER, 0);
+  // 語を始める時点の深さは、SP!・RP!で設定した直後の語だけ判定する（T-13）。
+  // 例外の入口がレッドゾーンに積んだぶんは判定しない（ハンドラが動けるように。TODO(T-90)）
+  if (th.depthSet) {
+    if (d > th.dcap) note(EXC.DSTACK_OVER, 0);
+    if (d < 0) note(EXC.DSTACK_UNDER, 0);
+    if (r > th.rcap) note(EXC.RSTACK_OVER, 0);
+    if (r < 0) note(EXC.RSTACK_UNDER, 0);
+  }
   for (const inst of insts) {
     const e = stackEffect(inst);
-    d -= e.pop; if (d < 0) note(EXC.DSTACK_UNDER, inst.slot);
-    d += e.push; if (d > th.dcap) note(EXC.DSTACK_OVER, inst.slot);
-    r -= e.rpop; if (r < 0) note(EXC.RSTACK_UNDER, inst.slot);
-    r += e.rpush; if (r > th.rcap) note(EXC.RSTACK_OVER, inst.slot);
+    // あふれは、その命令で深さが増えて容量を超えたとき。アンダーフローは、その命令が取り出すときに足りないとき。
+    // （レッドゾーンにいるハンドラや、SP!で範囲外にした後のハンドラが、深さを増やさない命令を実行できるように。TODO(T-90)）
+    d -= e.pop; if (e.pop > 0 && d < 0) note(EXC.DSTACK_UNDER, inst.slot);
+    d += e.push; if (e.push > e.pop && d > th.dcap) note(EXC.DSTACK_OVER, inst.slot);
+    r -= e.rpop; if (e.rpop > 0 && r < 0) note(EXC.RSTACK_UNDER, inst.slot);
+    r += e.rpush; if (e.rpush > e.rpop && r > th.rcap) note(EXC.RSTACK_OVER, inst.slot);
   }
   return [...found.values()];
 }
@@ -201,7 +231,7 @@ function branchTarget(th, inst) {
 
 /** LIT・PCRELの定数語を読む（命令の並びなのでフェッチと同じ経路） */
 function readLit(m, th) {
-  const v = m.mem.fetch32(th.litPtr, th.core);
+  const v = m.mem.fetch32(th.litPtr, memCtx(th));
   th.litPtr += 4;
   return v;
 }
@@ -213,7 +243,7 @@ function extUnimplemented() {
 }
 
 function execute(m, th, inst) {
-  const ctx = { core: th.core, tid: th.tid, mode: th.mode };
+  const ctx = memCtx(th);
   const { mem } = m;
   let a, b;
   switch (inst.op) {
@@ -358,9 +388,9 @@ function executeSys(m, th, inst, ctx) {
       th.up = a;
       return NEXT;
     case SYS['SP@']: th.push(th.depth); return NEXT;        // 実行する直前の深さ
-    case SYS['SP!']: a = th.pop(); th.depth = a | 0; return NEXT;
+    case SYS['SP!']: a = th.pop(); th.depth = a | 0; th.depthSet = true; return NEXT;
     case SYS['RP@']: th.push(th.rdepth); return NEXT;
-    case SYS['RP!']: a = th.pop(); th.rdepth = a | 0; return NEXT;
+    case SYS['RP!']: a = th.pop(); th.rdepth = a | 0; th.depthSet = true; return NEXT;
     case SYS.SYSCALL: {
       const e = new CpuException(EXC.SYSCALL);
       e.resumeNext = true;

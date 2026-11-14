@@ -52,8 +52,12 @@ export class Thread {
     this.litPtr = 0;             // 次に読む定数語のアドレス
     this.nextPc = 0;             // 「次の語」のアドレス（定数語の後ろ）
 
-    /** 段階2の仮の扱い：最後に起きた例外（スレッドは止まる）。段階4で例外の入口に置き換える */
+    /** 最後に起きた例外の記録（テストと表示用。CSRとは別に、戻り先や例外の前のモードも残す） */
     this.lastException = null;
+    /** 例外の入口の処理中（ベクタ先の語のフェッチが終わるまで）。この間の例外は二重例外（T-31） */
+    this.inEntry = false;
+    /** SP!・RP!で深さを設定した直後（次の語のフェッチで、始める時点の深さも判定する。T-13） */
+    this.depthSet = false;
   }
 
   // ---- データスタック ----
@@ -63,7 +67,7 @@ export class Thread {
   }
   pop() {
     if (this.depth <= 0) throw new Error('内部エラー: データスタックが空（フェッチ時の判定をすり抜けた）');
-    return this.ds[--this.depth];
+    return this.ds[--this.depth] ?? 0; // SP!で物理的な段数より深くした段は0（決定的にするため）
   }
   /** 上からi番目（0＝T、1＝N） */
   peek(i = 0) { return this.ds[this.depth - 1 - i]; }
@@ -75,7 +79,7 @@ export class Thread {
   }
   rpop() {
     if (this.rdepth <= 0) throw new Error('内部エラー: リターンスタックが空');
-    return this.rs[--this.rdepth];
+    return this.rs[--this.rdepth] ?? 0;
   }
 
   /** データスタックの中身（底から順。テストと表示用） */

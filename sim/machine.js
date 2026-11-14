@@ -12,7 +12,8 @@ import { makeConfig } from './config.js';
 import { Memory } from './memory.js';
 import { Thread } from './thread.js';
 import { issue, canSend } from './core.js';
-import { SYS, EV } from './isa.js';
+import { SYS, EV, IO } from './isa.js';
+import { KeyTable } from './devices/keytable.js';
 import { THREAD_STATE } from './devices/registers.js';
 
 const S = THREAD_STATE;
@@ -22,6 +23,9 @@ export class Machine {
   constructor(config = '9K') {
     this.cfg = typeof config === 'string' ? makeConfig(config) : config;
     this.mem = new Memory(this.cfg);
+    this.keytable = new KeyTable(this.cfg);
+    this.mem.mapDevice(IO.KEYTABLE, this.keytable);
+    this.mem.keytable = this.keytable;
     this.cores = Array.from({ length: this.cfg.ncores }, (_, c) => ({
       id: c,
       threads: Array.from({ length: this.cfg.nthreads }, (_, t) => new Thread(this.cfg, c, t)),
@@ -38,6 +42,7 @@ export class Machine {
   reset() {
     this.cycle = 0; // 仮想時間（サイクル数）
     for (const th of this.threads) th.reset();
+    this.keytable.reset(); // 全ページがキー0（11.1節）
     for (const core of this.cores) {
       core.last = this.cfg.nthreads - 1;
       core.dividerFreeAt = 0;

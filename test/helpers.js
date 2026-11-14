@@ -2,6 +2,8 @@
 import { Machine } from '../sim/machine.js';
 import { assemble } from '../asm/assembler.js';
 import { THREAD_STATE } from '../sim/devices/registers.js';
+import { KEY } from '../sim/devices/keytable.js';
+import { RESET, OP, SYS } from '../sim/isa.js';
 
 export const ORG = 0x0010_0000;   // コア0のローカルBSRAMの先頭（命令をフェッチできる）
 export const UP = 0x0010_4000;    // テストで使うユーザー領域（128バイト境界）
@@ -20,13 +22,32 @@ export function wordsToBytes(words) {
   return b;
 }
 
+export const HALT_WORD = W([OP.SYS, SYS.HALT]);
+export const NUM_VECTORS = 19; // 例外0〜18
+
+/** ブートROMの例外ベクタ（VBRのリセット値＋番号×4）をすべてHALTにする。例外が起きたらベクタ先で止まる */
+export function installHaltVectors(m) {
+  m.load(RESET.VBR, wordsToBytes(new Array(NUM_VECTORS).fill(HALT_WORD)));
+}
+
+/**
+ * 一般モードで動かせるように、ローカルBSRAMの全ページをキー1（W・X）にし、スレッドにキー1を与える。
+ */
+export function grantUserKey(m, th, key = 1) {
+  m.keytable.local[th.core].fill(key | KEY.W | KEY.X);
+  th.pkread = 1 << key;
+  th.pkwrite = 1 << key;
+}
+
 function start(m, image, { origin = ORG, up = UP, mode = 1, setup, maxCycles = 1_000_000, allowRunning = false }) {
   m.load(origin, image);
+  installHaltVectors(m);
   haltOthers(m, [0]);
   const th = m.thread(0);
   th.pc = origin;
   th.up = up;
   th.mode = mode;
+  if (mode === 0) grantUserKey(m, th);
   setup?.(m, th);
   const res = m.runUntilStop(maxCycles);
   if (!res.stopped && !allowRunning) throw new Error('止まらなかった');
@@ -69,6 +90,7 @@ export function runThreads(src, { threads, config = '9K', maxCycles = 1_000_000,
   const m = new Machine(config);
   const asm = assemble(src, { origin: ORG });
   for (let c = 0; c < m.cfg.ncores; c++) m.load(ORG + c * 0x1_0000, asm.bytes);
+  installHaltVectors(m);
   const tids = Object.keys(threads).map(Number);
   haltOthers(m, tids);
   for (const tid of tids) {

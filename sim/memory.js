@@ -8,9 +8,12 @@
 //   0xFFFF_0000〜0xFFFF_0FFF  ブートROM（書き込みは例外12）
 // 初期値はすべて0（T-15）。リトルエンディアン。
 //
-// 保護キーによる検査は段階4で入れる（ctx にモードなどを渡す予定）。
-import { MEM, EXC } from './isa.js';
+// 一般モード（ctx.mode === 0）のアクセスは、ページキー（9.4節）で判定する。特権モードは検査しない。
+import { MEM, IO, EXC } from './isa.js';
 import { CpuException } from './cpu-exception.js';
+import { KEY } from './devices/keytable.js';
+
+const USERPAGE_SIZE = 0x1000;
 
 /**
  * I/Oデバイスの口。
@@ -32,6 +35,8 @@ export class Memory {
     this.rom = new Uint8Array(MEM.ROM_SIZE);
     /** @type {Array<{base:number, dev:Device}>} */
     this.devices = [];
+    /** 保護キー表（sim/devices/keytable.js）。Machine が登録する。一般モードのアクセスの判定に使う */
+    this.keytable = null;
   }
 
   /** I/Oデバイスを登録する */
@@ -72,10 +77,39 @@ export class Memory {
     return null;
   }
 
-  #mapped(addr) {
+  /**
+   * アクセスの検査をして領域を返す（9.2節、9.4節）。
+   * @param {'r'|'w'} op
+   * @param {{ mode?: number, pkread?: number, pkwrite?: number }} ctx  mode===0 なら一般モード
+   */
+  #access(addr, op, ctx) {
+    addr >>>= 0;
+    const user = ctx.mode === 0;
+    // I/Oは、ユーザーページを除いて一般モードからアクセスできない（未登録の番地でも例外12を先にする）
+    if (user && addr >= MEM.IO_BASE && addr < MEM.ROM_BASE && !(addr >= IO.USERPAGE && addr < IO.USERPAGE + USERPAGE_SIZE)) {
+      throw new CpuException(EXC.PROTECT, addr);
+    }
     const r = this.region(addr);
     if (!r) throw new CpuException(EXC.BUS, addr);
+    if (r.kind === 'rom' && op === 'w') throw new CpuException(EXC.PROTECT, addr);
+    if (user) this.#checkKey(addr, r, op, ctx);
     return r;
+  }
+
+  /**
+   * ページキーの判定（一般モードのみ。9.4節）。
+   * 読み出し：PKREAD[キー]、実行：PKREAD[キー] かつ X、書き込み：PKWRITE[キー] かつ W。違反は例外12。
+   * ブートROMは一般モードから読み出しも実行もできない（T-34）。I/Oはキー表の対象外。
+   */
+  #checkKey(addr, r, op, ctx) {
+    if (r.kind === 'io') return;
+    if (r.kind === 'rom') throw new CpuException(EXC.PROTECT, addr);
+    const e = this.keytable.entryFor(r);
+    const key = e & KEY.MASK;
+    const ok = op === 'w'
+      ? ((ctx.pkwrite >>> key) & 1) && (e & KEY.W)
+      : ((ctx.pkread >>> key) & 1) && (op !== 'x' || (e & KEY.X));
+    if (!ok) throw new CpuException(EXC.PROTECT, addr);
   }
 
   static #align(addr) {
@@ -85,37 +119,35 @@ export class Memory {
   /** 32bitの読み出し（データ） */
   read32(addr, ctx = {}) {
     Memory.#align(addr);
-    const r = this.#mapped(addr);
-    if (r.kind === 'io') return r.dev.read32(r.off, ctx) >>> 0;
+    const r = this.#access(addr, 'r', ctx);
+    if (r.kind === 'io') return r.dev.read32(r.off, { ...ctx, addr: addr >>> 0 }) >>> 0;
     return get32(r.buf, r.off);
   }
 
   /** 32bitの書き込み（データ） */
   write32(addr, value, ctx = {}) {
     Memory.#align(addr);
-    const r = this.#mapped(addr);
-    if (r.kind === 'rom') throw new CpuException(EXC.PROTECT, addr);
-    if (r.kind === 'io') { r.dev.write32(r.off, value >>> 0, ctx); return; }
+    const r = this.#access(addr, 'w', ctx);
+    if (r.kind === 'io') { r.dev.write32(r.off, value >>> 0, { ...ctx, addr: addr >>> 0 }); return; }
     put32(r.buf, r.off, value);
   }
 
   /** 8bitの読み出し（ゼロ拡張） */
   read8(addr, ctx = {}) {
-    const r = this.#mapped(addr);
+    const r = this.#access(addr, 'r', ctx);
     if (r.kind === 'io') {
       if (!r.dev.read8) throw new CpuException(EXC.ALIGN, addr); // T-16
-      return r.dev.read8(r.off, ctx) & 0xff;
+      return r.dev.read8(r.off, { ...ctx, addr: addr >>> 0 }) & 0xff;
     }
     return r.buf[r.off];
   }
 
   /** 8bitの書き込み */
   write8(addr, value, ctx = {}) {
-    const r = this.#mapped(addr);
-    if (r.kind === 'rom') throw new CpuException(EXC.PROTECT, addr);
+    const r = this.#access(addr, 'w', ctx);
     if (r.kind === 'io') {
       if (!r.dev.write8) throw new CpuException(EXC.ALIGN, addr); // T-16
-      r.dev.write8(r.off, value & 0xff, ctx);
+      r.dev.write8(r.off, value & 0xff, { ...ctx, addr: addr >>> 0 });
       return;
     }
     r.buf[r.off] = value & 0xff;
@@ -135,13 +167,16 @@ export class Memory {
   /**
    * 命令フェッチ（命令語とLIT・PCRELの定数語）。
    * 自コアのローカルBSRAMとブートROMからだけ読める（9.2節）。それ以外は例外7（ローカルの容量の外を含む。T-82）。
+   * 一般モードでは、さらにページキーで判定する（PKREAD かつ X。違反は例外12。TODO(T-88)）。
+   * @param {{ core: number, mode?: number, pkread?: number, pkwrite?: number }} ctx
    */
-  fetch32(addr, core) {
+  fetch32(addr, ctx) {
     Memory.#align(addr);
     const r = this.region(addr);
-    if (!r || !((r.kind === 'local' && r.core === core) || r.kind === 'rom')) {
+    if (!r || !((r.kind === 'local' && r.core === ctx.core) || r.kind === 'rom')) {
       throw new CpuException(EXC.FETCH, addr);
     }
+    if (ctx.mode === 0) this.#checkKey(addr >>> 0, r, 'x', ctx);
     return get32(r.buf, r.off);
   }
 

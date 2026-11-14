@@ -8,7 +8,7 @@ import { decodeWord } from '../sim/decode.js';
 import { OP, SYS, EXC, RESET, ISA_VERSION } from '../sim/isa.js';
 import { THREAD_STATE } from '../sim/devices/registers.js';
 import { assemble } from '../asm/assembler.js';
-import { run, runWords, haltOthers, W, ORG, UP } from './helpers.js';
+import { run, runWords, haltOthers, grantUserKey, W, ORG, UP } from './helpers.js';
 
 const u = v => v >>> 0;
 const TRUE = 0xFFFFFFFF;
@@ -260,16 +260,27 @@ test('RP!', () => {
   assert.deepEqual(r.rstack, [9]);
 });
 
-test('SP!・RP!に範囲外の値を与えると、次の語のフェッチ時に例外（T-13）', () => {
-  let e = excOf('PUSH #17\nPOP SP\nNOP');     // 9Kの容量は16
-  assert.equal(e.exc, EXC.DSTACK_OVER);
-  assert.equal(e.epc, ORG + 8);               // 語0、定数語、語2
-  e = excOf('PUSHQ #-1\nPOP SP\nNOP');
-  assert.equal(e.exc, EXC.DSTACK_UNDER);
-  e = excOf('PUSH #14\nPOP RP\nNOP');         // リターンスタックの容量は16−3＝13
-  assert.equal(e.exc, EXC.RSTACK_OVER);
-  e = excOf('PUSHQ #-1\nPOP RP\nNOP');
-  assert.equal(e.exc, EXC.RSTACK_UNDER);
+test('SP!・RP!に範囲外の値を与えると、次の語のフェッチ時に例外（T-13）。ハンドラの最初の語では判定しない（TODO(T-90)）', () => {
+  // 起きた例外を順に集める
+  const excs = src => {
+    const list = [];
+    const r = run(src, { setup: m => m.on(e => { if (e.type === 'exception') list.push(e); }) });
+    return { list, r };
+  };
+  let { list, r } = excs('PUSH #17\nPOP SP\nNOP');   // 9Kの容量は16
+  assert.deepEqual(list.map(e => e.exc), [EXC.DSTACK_OVER]);
+  assert.equal(list[0].epc, ORG + 8);                 // 語0、定数語、語2
+  assert.equal(r.th.state, THREAD_STATE.HALT);        // ベクタ先のHALTまで進む
+  ({ list } = excs('PUSHQ #-1\nPOP SP\nNOP'));
+  assert.deepEqual(list.map(e => e.exc), [EXC.DSTACK_UNDER]);
+  ({ list } = excs('PUSH #14\nPOP RP\nNOP'));         // リターンスタックの容量は16−3＝13
+  assert.deepEqual(list.map(e => e.exc), [EXC.RSTACK_OVER]);
+  ({ list } = excs('PUSHQ #-1\nPOP RP\nNOP'));        // 深さが負なので入口で積めない（TODO(T-89)）
+  assert.deepEqual(list.map(e => e.exc), [EXC.DOUBLE]);
+  assert.equal(list[0].cause, EXC.RSTACK_UNDER);
+  // 範囲内に戻す語なら例外にならない（SP!の直後の語でも、深さを減らせば判定の範囲に入る）
+  ({ list, r } = excs('PUSH #17\nPOP SP\nl: PUSHQ #0\nPOP SP\nHALT'));
+  assert.deepEqual(list.map(e => e.exc), [EXC.DSTACK_OVER]); // PUSHQ #0 を含む語は始める時点で範囲外
 });
 
 test('SYSCALL は例外8。戻り先は次の語', () => {
@@ -282,7 +293,7 @@ test('SYSCALL は例外8。戻り先は次の語', () => {
 
 test('RETI：戻り先とモード（bit0）を戻す', () => {
   // 一般モードに移ってから HALT（特権命令）で例外6
-  const e = excOf('LEA user,PC\nPSHR\nRTI\nuser: PUSHQ #3\nHALT');
+  const e = excOf('LEA user,PC\nPSHR\nRTI\nuser: PUSHQ #3\nHALT', { setup: grantUserKey });
   assert.equal(e.exc, EXC.PRIVILEGE);
   assert.equal(e.mode, 0);
   assert.equal(e.epc, e.r.asm.symbols.get('user'));
@@ -437,10 +448,11 @@ test('スタック深さはフェッチ時に判定し、違反した語は実�
   assert.equal(e.r.stack.length, 15);
   e = excOf('PULR');
   assert.equal(e.exc, EXC.RSTACK_UNDER);
-  // 1語に2組。13組目と14組目を含む語（12から14になる）は実行しない（容量は16−3＝13）
+  // 1語に2組。13組目と14組目を含む語（12から14になる）は実行しない（容量は16−3＝13）。
+  // 例外の入口で戻り先を1段積むので、最後は13段
   e = excOf(Array(14).fill('PUSHQ #1\nPSHR').join('\n'));
   assert.equal(e.exc, EXC.RSTACK_OVER);
-  assert.equal(e.r.rstack.length, 12);
+  assert.equal(e.r.rstack.length, 13);
 });
 
 test('slot6 の DUP もスタック深さの判定に入る（T-01）', () => {
