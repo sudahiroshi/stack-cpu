@@ -8,8 +8,13 @@
 //   6（特権違反）、0〜3（スタック深さ）、9（BRK）。同時に起きたときはこの順（TODO(T-32)）。
 //
 // 段階2では、例外が起きたら記録してスレッドを止める（raise）。例外の入口は段階4で作る。
+//
+// 待機（段階3）：WAIT・RECV・SENDM は、続けられないときスタックを変えずに BLOCK を返し、
+// スレッドを待機状態（THREADSTAT 2〜4）にする。起きる条件が成り立ったら、スケジューラが同じ命令をもう一度実行する。
+// 時間のかかる操作（外部RAM、他コアのローカルBSRAM、除算器）は th.busyUntil に完了のサイクルを入れ、
+// スケジューラはそれまで次の発行を待たせる（THREADSTAT 5）。
 import {
-  OP, OPS, SYS, SYS_OPS, EXC, CSR, FEATURE, ISA_VERSION, CSR_USER_READABLE_MAX,
+  OP, OPS, SYS, SYS_OPS, EXC, CSR, EV, FEATURE, ISA_VERSION, CSR_USER_READABLE_MAX,
 } from './isa.js';
 import { decodeWord } from './decode.js';
 import { CpuException } from './cpu-exception.js';
@@ -26,6 +31,7 @@ const FETCH_PRIORITY = [   // TODO(T-32)
 // execute の戻り値
 const NEXT = 0;    // 同じ語の次の命令へ
 const JUMP = 1;    // 制御が移った（th.pc に次の語のアドレスを入れてある）
+const BLOCK = 2;   // 続けられないので待つ（スタックは変えていない。同じ命令をもう一度実行する）
 
 /** 命令のスタック効果（フェッチ時の深さの判定に使う） */
 export function stackEffect(inst) {
@@ -127,9 +133,12 @@ function depthFaults(th, insts) {
   return [...found.values()];
 }
 
-/** 1回の番：必要ならフェッチし、1命令を実行する */
+/**
+ * 1回の番：必要ならフェッチし、1命令を実行する。
+ * @returns {boolean} 命令を実行し終えたか（待機・例外なら false）
+ */
 export function issue(m, th) {
-  if (!th.dec && !fetch(m, th)) return;
+  if (!th.dec && !fetch(m, th)) return false;
   const inst = th.dec.insts[th.idx];
   let r;
   try {
@@ -140,7 +149,11 @@ export function issue(m, th) {
       slot: inst.slot, addr: e.addr, wordAddr: th.wordAddr, word: th.word,
       resumeAddr: e.resumeNext ? th.nextPc : th.wordAddr,
     });
-    return;
+    return false;
+  }
+  if (r === BLOCK) {
+    if (m.listeners.size) m.emit({ type: 'block', tid: th.tid, cycle: m.cycle, state: th.state, wordAddr: th.wordAddr, slot: inst.slot });
+    return false;
   }
   th.instret++;
   if (m.listeners.size) {
@@ -150,12 +163,26 @@ export function issue(m, th) {
       rdepth: th.rdepth,
     });
   }
-  if (r === JUMP) { th.dec = null; return; }
+  if (r === JUMP) { th.dec = null; return true; }
   th.idx++;
   if (th.idx >= th.dec.insts.length) {
     th.pc = th.nextPc;
     th.dec = null;
   }
+  return true;
+}
+
+/** データのアクセスにかかる時間を記録する（T-25） */
+function busy(m, th, addr) {
+  th.busyUntil = Math.max(th.busyUntil, m.cycle + m.mem.latency(addr, th.core));
+}
+
+/** 除算器を使う（1コアに1個。使用中なら空くまで待ち、発行した順に使う。T-24） */
+function useDivider(m, th) {
+  const core = m.cores[th.core];
+  const start = Math.max(m.cycle, core.dividerFreeAt);
+  core.dividerFreeAt = start + m.cfg.dividerCycles;
+  th.busyUntil = Math.max(th.busyUntil, core.dividerFreeAt);
 }
 
 // ---------------------------------------------------------------- 実行
@@ -235,10 +262,10 @@ function execute(m, th, inst) {
     case OP.SLIT: th.push(inst.imm); return NEXT;
     case OP['<']: b = th.pop(); a = th.pop(); th.push((a | 0) < (b | 0) ? TRUE : 0); return NEXT;
     case OP['U<']: b = th.pop(); a = th.pop(); th.push(a < b ? TRUE : 0); return NEXT;
-    case OP['@']: a = th.pop(); th.push(mem.read32(a, ctx)); return NEXT;
-    case OP['!']: a = th.pop(); b = th.pop(); mem.write32(a, b, ctx); return NEXT;
-    case OP['C@']: a = th.pop(); th.push(mem.read8(a, ctx)); return NEXT;
-    case OP['C!']: a = th.pop(); b = th.pop(); mem.write8(a, b, ctx); return NEXT;
+    case OP['@']: a = th.pop(); th.push(mem.read32(a, ctx)); busy(m, th, a); return NEXT;
+    case OP['!']: a = th.pop(); b = th.pop(); mem.write32(a, b, ctx); busy(m, th, a); return NEXT;
+    case OP['C@']: a = th.pop(); th.push(mem.read8(a, ctx)); busy(m, th, a); return NEXT;
+    case OP['C!']: a = th.pop(); b = th.pop(); mem.write8(a, b, ctx); busy(m, th, a); return NEXT;
     case OP.UA: th.push(th.up | (inst.imm << 2)); return NEXT;
     case OP.SYS: return executeSys(m, th, inst, ctx);
   }
@@ -255,8 +282,58 @@ function executeSys(m, th, inst, ctx) {
   let a, b, c;
   switch (inst.sub) {
     case SYS.TID: th.push(th.tid); return NEXT;
-    case SYS.WAIT: case SYS.SIGNAL: case SYS.SENDM: case SYS.RECV: case SYS['SENDM?']:
-      throw new Error(`未実装（段階3）: ${s.forth}`);
+    case SYS.WAIT: {
+      // ( mask -- bits )：立っているビットを返し、ラッチ式のビットを消す（6.4節）
+      const bits = m.pendingEvents(th) & th.peek(0);
+      if (!bits) { th.state = THREAD_STATE.WAIT; return BLOCK; } // mask＝0なら永久に待つ（T-26）
+      th.pop();
+      th.events &= ~bits;
+      th.push(bits);
+      return NEXT;
+    }
+    case SYS.SIGNAL: {
+      // ( tid -- )：相手のイベントビット1を立てる。tid＝−1で全スレッド（自分を含む。T-27）
+      a = th.pop();
+      if (a === TRUE) {
+        for (const t of m.threads) t.events |= 1 << EV.SIGNAL;
+      } else {
+        const t = m.findThread(a);
+        if (!t) throw new CpuException(EXC.BAD_TID);
+        t.events |= 1 << EV.SIGNAL;
+      }
+      return NEXT;
+    }
+    case SYS.SENDM: case SYS['SENDM?']: {
+      // ( x1 … xn tag tid -- ) / ( x1 … xn tag tid -- flag )（10.2節）
+      const n = inst.imm;
+      const target = m.findThread(th.peek(0));
+      if (!target) throw new CpuException(EXC.BAD_TID);
+      const trying = inst.sub === SYS['SENDM?'];
+      if (!canSend(m, th, target, n, trying)) {
+        if (trying) {                          // 送らずに偽。成否にかかわらず引数を消費する
+          for (let k = 0; k < n + 2; k++) th.pop();
+          th.push(0);
+          return NEXT;
+        }
+        if (!target.sendQueue.includes(th.tid)) target.sendQueue.push(th.tid);
+        th.state = THREAD_STATE.SEND;
+        return BLOCK;
+      }
+      const qi = target.sendQueue.indexOf(th.tid);
+      if (qi >= 0) target.sendQueue.splice(qi, 1);
+      th.pop();                                // tid
+      const tag = th.pop() & 0xFFFF;            // 下位16bitを使う（TODO(T-86)）
+      const data = [];
+      for (let k = 0; k < n; k++) data.unshift(th.pop());
+      // ヘッダ：送信元tid（31〜24）、tag（23〜8）、予備0（7〜4）、n（3〜0）（10.3節）
+      target.mbox.push(((th.tid << 24) | (tag << 8) | n) >>> 0, ...data);
+      if (trying) th.push(TRUE);
+      return NEXT;
+    }
+    case SYS.RECV:
+      if (th.mbox.length === 0) { th.state = THREAD_STATE.RECV; return BLOCK; }
+      th.push(th.mbox.shift());
+      return NEXT;
     case SYS.FENCE: return NEXT; // キャッシュなし・インオーダーなので何もしない（9.2節）
     case SYS.XCHG: {
       a = th.pop(); b = th.pop();
@@ -265,6 +342,7 @@ function executeSys(m, th, inst, ctx) {
       if (r && r.kind === 'local' && r.core !== th.core) throw new CpuException(EXC.REMOTE_XCHG, a);
       const old = mem.read32(a, ctx);
       mem.write32(a, b, ctx);
+      busy(m, th, a);
       th.push(old);
       return NEXT;
     }
@@ -306,17 +384,20 @@ function executeSys(m, th, inst, ctx) {
     }
     case SYS.BRK: throw new CpuException(EXC.BREAK); // 通常はフェッチ時に起きる
     case SYS['U/MOD']:
+      useDivider(m, th);
       b = th.pop(); a = th.pop();
       if (b === 0) { th.push(a); th.push(TRUE); return NEXT; }   // 0除算：余り＝被除数、商＝全ビット1
       th.push(a % b); th.push(Math.floor(a / b));
       return NEXT;
     case SYS['/MOD']:
+      useDivider(m, th);
       b = th.pop() | 0; a = th.pop() | 0;
       if (b === 0) { th.push(a); th.push(TRUE); return NEXT; }
       if (a === -0x80000000 && b === -1) { th.push(0); th.push(a); return NEXT; }
       th.push(a % b); th.push(Math.trunc(a / b));                 // 0方向への切り捨て
       return NEXT;
     case SYS['UM/MOD']: {
+      useDivider(m, th);
       c = th.pop(); b = th.pop(); a = th.pop();                   // ( lo hi u -- rem quot )
       if (b >= c) { th.push(0); th.push(TRUE); return NEXT; }    // 商があふれる（u＝0を含む。T-83）。余りは0（T-21）
       const n = (BigInt(b) << 32n) | BigInt(a);
@@ -326,6 +407,18 @@ function executeSys(m, th, inst, ctx) {
     }
   }
   throw new Error(`内部エラー: 不明なSYS ${inst.sub}`);
+}
+
+/**
+ * SENDM・SENDM?で、いま送れるか（10.2節）。
+ * 相手のFIFOにn＋1語の空きがあり、先に待っているスレッドがいないこと（待ち始めた順に送る。T-28）。
+ * SENDMで待っているスレッドは、自分が待ち行列の先頭なら送れる。SENDM?は待ち行列に入らないので、
+ * 誰かが待っていれば送れない（TODO(T-85)）。
+ */
+export function canSend(m, th, target, n, trying) {
+  if (target.mbox.length + n + 1 > m.cfg.mboxDepth) return false;
+  if (target.sendQueue.length === 0) return true;
+  return !trying && target.sendQueue[0] === th.tid;
 }
 
 /** CSRの読み出し（8章）。番号の正しさはフェッチ時に検査済み */
@@ -341,7 +434,7 @@ export function csrRead(m, th, r) {
     case CSR.RAMSIZE: return cfg.extRamSize;
     case CSR.MBOXDEPTH: return cfg.mboxDepth;
     case CSR.STATUS: return th.mode & 1;
-    case CSR.EVPEND: return th.events >>> 0; // TODO(段階3): 状態のビット（メールボックス、UART）を合わせる
+    case CSR.EVPEND: return m.pendingEvents(th);
     case CSR.VBR: return th.vbr;
     case CSR.ECAUSE: return th.ecause;
     case CSR.EPC: return th.epc;

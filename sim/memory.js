@@ -122,6 +122,17 @@ export class Memory {
   }
 
   /**
+   * データのアクセスにかかるサイクル数（9.2節。T-25）。
+   * 外部RAM・他コアのローカルBSRAMは構成の待ち時間、それ以外は localLatency。
+   */
+  latency(addr, core) {
+    const r = this.region(addr);
+    if (r?.kind === 'ext') return this.cfg.extRamLatency;
+    if (r?.kind === 'local' && r.core !== core) return this.cfg.remoteLocalLatency;
+    return this.cfg.localLatency;
+  }
+
+  /**
    * 命令フェッチ（命令語とLIT・PCRELの定数語）。
    * 自コアのローカルBSRAMとブートROMからだけ読める（9.2節）。それ以外は例外7（ローカルの容量の外を含む。T-82）。
    */

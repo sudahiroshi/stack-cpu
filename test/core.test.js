@@ -8,7 +8,7 @@ import { decodeWord } from '../sim/decode.js';
 import { OP, SYS, EXC, RESET, ISA_VERSION } from '../sim/isa.js';
 import { THREAD_STATE } from '../sim/devices/registers.js';
 import { assemble } from '../asm/assembler.js';
-import { run, runWords, W, ORG, UP } from './helpers.js';
+import { run, runWords, haltOthers, W, ORG, UP } from './helpers.js';
 
 const u = v => v >>> 0;
 const TRUE = 0xFFFFFFFF;
@@ -39,7 +39,11 @@ test('リセット時の状態（11.1節）', () => {
   assert.equal(th.rdepth, 0);
   assert.equal(th.up, 0);
   assert.equal(th.vbr, RESET.VBR);
-  assert.equal(th.state, THREAD_STATE.RUNNING);
+  // 全スレッドがリセット直後の状態（THREADSTAT 0）で、同じ番地から始まる
+  for (const t of m.threads) {
+    assert.equal(t.state, THREAD_STATE.RESET);
+    assert.equal(t.pc, RESET.PC);
+  }
 });
 
 test('ブートROMに読み込んで 0xFFFF_0000 から実行できる', () => {
@@ -403,12 +407,6 @@ test('BRK はフェッチ時に例外9（語は実行しない、戻り先は語
   assert.deepEqual(e.r.stack, []);
 });
 
-test('WAIT・SIGNAL・SENDM・SENDM?・RECV は段階3で実装する', () => {
-  for (const src of ['PUSHQ #1\nWAIT', 'PUSHQ #0\nSIGNAL', 'PUSHQ #0\nPUSHQ #0\nSEND 0', 'PUSHQ #0\nPUSHQ #0\nTRYSEND 0', 'RECV']) {
-    assert.throws(() => run(src), /段階3/, src);
-  }
-});
-
 // ---------------------------------------------------------------- フェッチ時の判定
 
 test('配置違反（例外5）と不正命令（例外4）はフェッチ時', () => {
@@ -548,6 +546,7 @@ test('実行トレース（listeners）', () => {
   const m = new Machine('9K');
   const r = assemble('PUSHQ #1\nPUSHQ #2\nADD\nHALT', { origin: ORG });
   m.load(ORG, r.bytes);
+  haltOthers(m, [0]);
   m.thread(0).pc = ORG;
   const events = [];
   m.on(e => events.push(e));
@@ -560,6 +559,7 @@ test('実行トレース（listeners）', () => {
 test('例外のイベント', () => {
   const m = new Machine('9K');
   m.load(ORG, assemble('LD 0', { origin: ORG }).bytes);
+  haltOthers(m, [0]);
   m.thread(0).pc = ORG;
   const events = [];
   m.on(e => events.push(e));

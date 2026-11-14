@@ -14,6 +14,11 @@ export const PRESETS = {
     mboxWords: 512,            // 1コアあたり。スレッド数で等分
     features: FEATURE.DIVIDER | FEATURE.MULS,
     videoCaps: 0b0001,         // モード0のみ（当初）
+    // 時間のかかる操作のサイクル数（spec 5.1節、9.2節。T-25）
+    extRamLatency: 8,          // 外部RAMへのアクセス
+    remoteLocalLatency: 2,     // 他コアのローカルBSRAMへのアクセス
+    localLatency: 1,           // 自コアのローカルBSRAM、ブートROM、I/O
+    dividerCycles: 32,         // 除算器（1bit/サイクル）
   },
   '20K': {
     name: 'Tang Nano 20K',
@@ -27,6 +32,11 @@ export const PRESETS = {
     mboxWords: 512,
     features: FEATURE.DIVIDER | FEATURE.MULS,
     videoCaps: 0b0001,
+    // 時間のかかる操作のサイクル数（spec 5.1節、9.2節。T-25）
+    extRamLatency: 8,          // 外部RAMへのアクセス
+    remoteLocalLatency: 2,     // 他コアのローカルBSRAMへのアクセス
+    localLatency: 1,           // 自コアのローカルBSRAM、ブートROM、I/O
+    dividerCycles: 32,         // 除算器（1bit/サイクル）
   },
 };
 

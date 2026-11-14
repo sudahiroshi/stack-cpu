@@ -1,6 +1,7 @@
 // テストの補助関数
 import { Machine } from '../sim/machine.js';
 import { assemble } from '../asm/assembler.js';
+import { THREAD_STATE } from '../sim/devices/registers.js';
 
 export const ORG = 0x0010_0000;   // コア0のローカルBSRAMの先頭（命令をフェッチできる）
 export const UP = 0x0010_4000;    // テストで使うユーザー領域（128バイト境界）
@@ -21,6 +22,7 @@ export function wordsToBytes(words) {
 
 function start(m, image, { origin = ORG, up = UP, mode = 1, setup, maxCycles = 1_000_000, allowRunning = false }) {
   m.load(origin, image);
+  haltOthers(m, [0]);
   const th = m.thread(0);
   th.pc = origin;
   th.up = up;
@@ -29,6 +31,11 @@ function start(m, image, { origin = ORG, up = UP, mode = 1, setup, maxCycles = 1
   const res = m.runUntilStop(maxCycles);
   if (!res.stopped && !allowRunning) throw new Error('止まらなかった');
   return { m, th, cycles: res.cycles, stack: th.dataStack(), rstack: th.returnStack(), exc: th.lastException };
+}
+
+/** tids 以外のスレッドを止めておく（1スレッドだけのテスト用） */
+export function haltOthers(m, tids) {
+  for (const th of m.threads) if (!tids.includes(th.tid)) th.state = THREAD_STATE.HALT;
 }
 
 /**
@@ -47,4 +54,33 @@ export function run(src, opts = {}) {
 export function runWords(words, opts = {}) {
   const m = new Machine(opts.config ?? '9K');
   return start(m, wordsToBytes(words), opts);
+}
+
+/**
+ * 複数のスレッドを動かす。ソースをアセンブルして各コアのローカルBSRAMの先頭に読み込み、
+ * threads に挙げたスレッドをそれぞれのラベルから始める（他のスレッドは止めておく）。
+ * UPはスレッドごとに UP＋tid×128。
+ * @param {string} src
+ * @param {{ threads: Record<number, string>, config?: string|object, maxCycles?: number,
+ *           setup?: (m: Machine) => void, trace?: boolean }} opts
+ * @returns {{ m: Machine, asm: object, cycles: number, stopped: boolean, blocked: number[], events: object[] }}
+ */
+export function runThreads(src, { threads, config = '9K', maxCycles = 1_000_000, setup, trace = false }) {
+  const m = new Machine(config);
+  const asm = assemble(src, { origin: ORG });
+  for (let c = 0; c < m.cfg.ncores; c++) m.load(ORG + c * 0x1_0000, asm.bytes);
+  const tids = Object.keys(threads).map(Number);
+  haltOthers(m, tids);
+  for (const tid of tids) {
+    const th = m.thread(tid);
+    const sym = asm.symbols.get(threads[tid]);
+    if (sym === undefined) throw new Error(`ラベルがない: ${threads[tid]}`);
+    th.pc = sym + (tid >> 4) * 0x1_0000;
+    th.up = UP + tid * 128;
+  }
+  setup?.(m);
+  const events = [];
+  if (trace) m.on(e => events.push(e));
+  const res = m.runUntilStop(maxCycles);
+  return { m, asm, ...res, events };
 }

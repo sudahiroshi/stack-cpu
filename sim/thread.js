@@ -36,7 +36,13 @@ export class Thread {
     this.instret = 0;            // 実行した命令数（T-19）
     this.events = 0;             // イベントのラッチ（段階3）
     this.state = THREAD_STATE.RESET;
-    this.readyCycle = 0;         // この番号のサイクル以降に発行できる（間隔D）
+    this.readyCycle = 0;         // この番号のサイクル以降に発行できる（間隔D、時間のかかる操作）
+    this.busyUntil = 0;          // 実行中の時間のかかる操作（外部RAM、除算）が終わるサイクル
+
+    // メールボックス（10章）。受信用のFIFO（深さMBOXDEPTH）と、このスレッドへの送信を待っているスレッドのtid（待ち始めた順。T-28）
+    // TODO(T-87): THREADCTLでスレッドをリセットしたときにメールボックスを空にするか
+    this.mbox = [];
+    this.sendQueue = [];
 
     // 命令語バッファ（6.1節）。語の途中でブロックしても続きから実行できるように保持する
     this.word = 0;               // 実行中の命令語
