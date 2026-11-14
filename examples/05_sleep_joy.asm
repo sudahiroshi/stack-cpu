@@ -1,4 +1,5 @@
 ; 05_sleep_joy.asm — タイマで待ってからジョイパッドを読む（一般モードで動く）
+; Aボタンが押されていたら EXIT で終わる（ブートROMのSYSCALLのハンドラを使う）
 UP_CNTLO  EQU $FF0F0000
 UP_CNTHI  EQU $FF0F0004
 UP_CMPLO  EQU $FF0F0008
@@ -13,7 +14,9 @@ main:   PUSH  #16667      ; ( 16667 )        約1/60秒
         AND               ; ( pressed )
         BNZ   on_a        ; ( )
         BRA   main
-on_a:   HALT
+on_a:   PUSHQ #0          ; ( 0 )            終了コード
+        PUSHQ #0          ; ( 0 0 )          SYSCALL 0＝EXIT（11.4節。一般モードではHALTは使えない）
+        TRAP
 
 ; sleep ( us -- )
 sleep:  LD    UP_CNTHI    ; ( us h1 )

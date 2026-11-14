@@ -187,7 +187,8 @@ test('examples/05_sleep_joy.asm：約1/60秒ごとにジョイパッドを見て
   m.gpio.joy = 0x10;
   res = m.runUntilStop(54 * 100_000);
   assert.equal(res.stopped, true);
-  assert.equal(m.thread(0).lastException, null);
+  // 最後は SYSCALL の EXIT（このテストではROMのハンドラの代わりにベクタのHALTで止まる）
+  assert.equal(m.thread(0).lastException?.exc, EXC.SYSCALL);
   assert.ok(m.timer.counter >= 100_000 && m.timer.counter < 100_000 + 2 * 16_667);
 });
 

@@ -22,7 +22,7 @@ npm run serve   # http://localhost:8000/ui/ をブラウザで開く
 
 ## 状況
 
-段階5（周辺回路）まで完了。実装は CLAUDE.md の「実装の順番」に沿って進める。
+段階1〜6（アセンブラ、命令実行、バレル、例外、周辺回路、ブートROM）まで完了。実装は CLAUDE.md の「実装の順番」に沿って進める。
 
 ```sh
 npm run asm -- examples/01_sum.asm                     # リスティングを表示

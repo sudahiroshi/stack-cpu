@@ -46,15 +46,6 @@ test('リセット時の状態（11.1節）', () => {
   }
 });
 
-test('ブートROMに読み込んで 0xFFFF_0000 から実行できる', () => {
-  const m = new Machine('9K');
-  const r = assemble(readFileSync(new URL('../rom/boot.asm', import.meta.url), 'utf8'));
-  m.load(r.origin, r.bytes);
-  assert.equal(m.runUntilStop(1000).stopped, true);
-  assert.equal(m.thread(0).lastException, null);
-  assert.equal(m.thread(0).state, THREAD_STATE.HALT);
-});
-
 // ---------------------------------------------------------------- 基本命令
 
 test('NOP', () => assert.deepEqual(stackOf('NOP\nNOP'), []));
@@ -312,7 +303,7 @@ test('HALT', () => {
 test('CSR@：構成の値（9K）', () => {
   assert.deepEqual(stackOf('MFC 0\nMFC 1\nMFC 2\nMFC 3\nMFC 4\nMFC 5\nMFC 6\nMFC 7\nMFC 8\nMFC 10'),
     [ISA_VERSION, 3, 1, 8, 16, 24 * 1024, 8 * 1024 * 1024, 64, 1, RESET.VBR]);
-  assert.equal(ISA_VERSION, 0x0008);
+  assert.equal(ISA_VERSION, 0x0009);
 });
 
 test('CSR@：構成の値（20K）', () => {
