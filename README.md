@@ -4,6 +4,8 @@ Tang Nano（9K／20K）向けに設計中の32bitスタックマシンCPU（バ�
 
 - 仕様書：[docs/spec.md](docs/spec.md)
 - 決定の記録：[docs/decisions.md](docs/decisions.md)
+- 画面の仕様：[docs/ui.md](docs/ui.md)
+- UARTからの操作（起動の表示、ROMのモニタ）：[docs/uart.md](docs/uart.md)
 - 開発の規則（Claude Code向け）：[CLAUDE.md](CLAUDE.md)
 
 ## 必要なもの
