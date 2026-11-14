@@ -122,6 +122,10 @@ export const CSR = {
 };
 export const CSR_USER_READABLE_MAX = 9; // CSR@ #0〜#9 は一般モードでも可
 
+// ISAVER（CSR 0）の値＝仕様書の版（主番号 << 8 | 副番号）。v0.3 → 0x0003、v1.0 → 0x0100。
+// 仕様書の版を上げたら必ず合わせる（test/isa.test.js で docs/spec.md の表題と照合している）。
+export const ISA_VERSION = 0x0003;
+
 export const FEATURE = { DIVIDER: 1 << 0, MULS: 1 << 1, EXTEXEC: 1 << 2, EXTFRAME: 1 << 3 };
 
 // ---- イベントのビット（6.4節） ----

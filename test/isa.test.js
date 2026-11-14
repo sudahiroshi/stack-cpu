@@ -6,6 +6,8 @@ import {
 } from '../sim/isa.js';
 import { buildMnemonicTable } from '../asm/mnemonics.js';
 import { makeConfig } from '../sim/config.js';
+import { readFileSync } from 'node:fs';
+import { ISA_VERSION } from '../sim/isa.js';
 
 test('基本命令は0〜31がちょうど1つずつ', () => {
   assert.equal(OPS.length, 32);
@@ -61,4 +63,12 @@ test('ニーモニック表に重複がない（両方の名前で引ける）',
 test('構成：メールボックスの深さ', () => {
   assert.equal(makeConfig('9K').mboxDepth, 64);
   assert.equal(makeConfig('20K').mboxDepth, 64); // 1コアあたり8スレッドで等分
+});
+
+test('ISAVER（ISA_VERSION）は仕様書の版と一致する', () => {
+  const spec = readFileSync(new URL('../docs/spec.md', import.meta.url), 'utf8');
+  const m = spec.match(/^# .*（v(\d+)\.(\d+)）/m);
+  assert.ok(m, '仕様書の表題に版（vX.Y）がない');
+  assert.equal(ISA_VERSION, (Number(m[1]) << 8) | Number(m[2]),
+    `仕様書は v${m[1]}.${m[2]}、ISA_VERSION は 0x${ISA_VERSION.toString(16).padStart(4, '0')}`);
 });

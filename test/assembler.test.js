@@ -134,10 +134,18 @@ test('後方への遠い分岐も次の語へ移す', () => {
   assert.equal(r.words[n - 1] >>> 0, ((OP.JMP << 27) | ((-(n - 1)) & 0x7ffffff)) >>> 0);
 });
 
-test('分岐は32bit空間を一周して届く（ROMからローカルBSRAMへ）', () => {
-  const r = assemble('ORG $FFFF0000\nBRA $00100000');
-  // 0x00100000 − 0xFFFF0000 = +0x110000 バイト = +0x44000 語
-  assert.deepEqual(r.words, [((OP.JMP << 27) | 0x44000) >>> 0]);
+test('分岐先の計算は32bitで一周しない（ROMからローカルBSRAMへは届かない。T-03）', () => {
+  // 差は 0x00100000 − 0xFFFF0000 = −0xFFEF0000 バイト。27bit（±64M語）に収まらない
+  assert.match(asmErrors('ORG $FFFF0000\nBRA $00100000')[0].message, /届かない/);
+  // 逆向きも同じ
+  assert.match(asmErrors('ORG $00100000\nBRA $FFFF0000')[0].message, /届かない/);
+});
+
+test('slot0の分岐は±64M語まで届く（27bit）', () => {
+  // 最大は +(2^26−1) 語
+  const max = (2 ** 26 - 1) * 4;
+  assert.deepEqual(assemble(`BRA ${max}`).words, [((OP.JMP << 27) | (2 ** 26 - 1)) >>> 0]);
+  assert.match(asmErrors(`BRA ${max + 4}`)[0].message, /届かない/);
 });
 
 // ---- PCREL ----

@@ -491,10 +491,10 @@ export function assemble(source, options = {}) {
         err(b.line, e.message);
         continue;
       }
-      // 分岐先の計算は32bitで一周する（ブートROMとローカルBSRAMの間も届く）。最短の差を使う
-      const diff = toU32(target - w.addr);
+      // 分岐先の計算は32bitで一周しない（T-03）。番地どうしの実際の差を使う
+      const diff = toU32(target) - w.addr;
       if (diff % 4 !== 0) { err(b.line, `分岐先が4バイト境界にない: ${hex8(toU32(target))}`); continue; }
-      const offset = diff / 4 >= 2 ** 29 ? diff / 4 - 2 ** 30 : diff / 4;
+      const offset = diff / 4;
       b.offset = offset;
       if (!fitsSigned(offset, slotShift(b.slot))) {
         if (b.slot === 0) { err(b.line, '分岐先が遠すぎて届かない'); continue; }
