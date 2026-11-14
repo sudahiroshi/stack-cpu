@@ -260,7 +260,7 @@ test('RP!', () => {
   assert.deepEqual(r.rstack, [9]);
 });
 
-test('SP!・RP!に範囲外の値を与えると、次の語のフェッチ時に例外（T-13）。ハンドラの最初の語では判定しない（TODO(T-90)）', () => {
+test('SP!・RP!に範囲外の値を与えると、次の語のフェッチ時に例外（T-13）。ハンドラの最初の語では判定しない（T-90）', () => {
   // 起きた例外を順に集める
   const excs = src => {
     const list = [];
@@ -275,7 +275,7 @@ test('SP!・RP!に範囲外の値を与えると、次の語のフェッチ時�
   assert.deepEqual(list.map(e => e.exc), [EXC.DSTACK_UNDER]);
   ({ list } = excs('PUSH #14\nPOP RP\nNOP'));         // リターンスタックの容量は16−3＝13
   assert.deepEqual(list.map(e => e.exc), [EXC.RSTACK_OVER]);
-  ({ list } = excs('PUSHQ #-1\nPOP RP\nNOP'));        // 深さが負なので入口で積めない（TODO(T-89)）
+  ({ list } = excs('PUSHQ #-1\nPOP RP\nNOP'));        // 深さが負なので入口で積めない（T-89）
   assert.deepEqual(list.map(e => e.exc), [EXC.DOUBLE]);
   assert.equal(list[0].cause, EXC.RSTACK_UNDER);
   // 範囲内に戻す語なら例外にならない（SP!の直後の語でも、深さを減らせば判定の範囲に入る）
@@ -312,7 +312,7 @@ test('HALT', () => {
 test('CSR@：構成の値（9K）', () => {
   assert.deepEqual(stackOf('MFC 0\nMFC 1\nMFC 2\nMFC 3\nMFC 4\nMFC 5\nMFC 6\nMFC 7\nMFC 8\nMFC 10'),
     [ISA_VERSION, 3, 1, 8, 16, 24 * 1024, 8 * 1024 * 1024, 64, 1, RESET.VBR]);
-  assert.equal(ISA_VERSION, 0x0005);
+  assert.equal(ISA_VERSION, 0x0006);
 });
 
 test('CSR@：構成の値（20K）', () => {

@@ -167,7 +167,7 @@ export class Memory {
   /**
    * 命令フェッチ（命令語とLIT・PCRELの定数語）。
    * 自コアのローカルBSRAMとブートROMからだけ読める（9.2節）。それ以外は例外7（ローカルの容量の外を含む。T-82）。
-   * 一般モードでは、さらにページキーで判定する（PKREAD かつ X。違反は例外12。TODO(T-88)）。
+   * 一般モードでは、さらにページキーで判定する（PKREAD かつ X。違反は例外12。T-88）。
    * @param {{ core: number, mode?: number, pkread?: number, pkwrite?: number }} ctx
    */
   fetch32(addr, ctx) {

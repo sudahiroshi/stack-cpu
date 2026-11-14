@@ -234,7 +234,7 @@ test('一般モード：XCHGは読み出しと書き込みの両方の権限が�
   assert.equal(run('PUSHQ #0\nPUSH #$01000000\nXCHG', { mode: 0, setup: ro }).exc.exc, EXC.PROTECT);
 });
 
-test('一般モード：実行は PKREAD[キー] かつ X（違反は例外12。TODO(T-88)）', () => {
+test('一般モード：実行は PKREAD[キー] かつ X（違反は例外12。T-88）', () => {
   // f はローカルBSRAMのページ1（1KB単位）。そのページだけXを外す
   const src = 'LEA f,PC\nJSR (T)\nORG $00100400\nf: HALT';
   const noX = (m, th) => { grantUserKey(m, th); m.keytable.local[0][1] = 1 | KEY.W; };

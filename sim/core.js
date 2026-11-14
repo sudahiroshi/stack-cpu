@@ -68,7 +68,7 @@ export function raise(m, th, exc, { slot = 0, addr = 0, wordAddr, word = 0, resu
   th.lastException = { exc, epc: th.epc, eir: th.eir, eslot: slot, eaddr: th.eaddr, resumeAddr: ret, mode: th.mode };
   th.dec = null;
 
-  // リターンスタックの物理的な段数（容量＋レッドゾーン3段）を使い切っている、または深さが負（RP!で設定）なら積めない（TODO(T-89)）
+  // リターンスタックの物理的な段数（容量＋レッドゾーン3段）を使い切っている、または深さが負（RP!で設定）なら積めない（T-89）
   const cannotPush = th.rdepth < 0 || th.rdepth >= th.rs.length;
   if (th.inEntry || cannotPush) {
     th.ecause = EXC.DOUBLE;
@@ -82,7 +82,7 @@ export function raise(m, th, exc, { slot = 0, addr = 0, wordAddr, word = 0, resu
   th.mode = 1;
   th.pc = (th.vbr + exc * 4) >>> 0;
   th.inEntry = true;    // ベクタ先の語のフェッチが終わるまで
-  th.depthSet = false;  // ハンドラの最初の語では、始める時点の深さを判定しない（TODO(T-90)）
+  th.depthSet = false;  // ハンドラの最初の語では、始める時点の深さを判定しない（T-90）
   m.emit({ type: 'exception', tid: th.tid, ...th.lastException });
 }
 
@@ -144,7 +144,7 @@ function depthFaults(th, insts) {
   const note = (exc, slot) => { if (!found.has(exc)) found.set(exc, { exc, slot }); };
   let d = th.depth, r = th.rdepth;
   // 語を始める時点の深さは、SP!・RP!で設定した直後の語だけ判定する（T-13）。
-  // 例外の入口がレッドゾーンに積んだぶんは判定しない（ハンドラが動けるように。TODO(T-90)）
+  // 例外の入口がレッドゾーンに積んだぶんは判定しない（ハンドラが動けるように。T-90）
   if (th.depthSet) {
     if (d > th.dcap) note(EXC.DSTACK_OVER, 0);
     if (d < 0) note(EXC.DSTACK_UNDER, 0);
@@ -154,7 +154,7 @@ function depthFaults(th, insts) {
   for (const inst of insts) {
     const e = stackEffect(inst);
     // あふれは、その命令で深さが増えて容量を超えたとき。アンダーフローは、その命令が取り出すときに足りないとき。
-    // （レッドゾーンにいるハンドラや、SP!で範囲外にした後のハンドラが、深さを増やさない命令を実行できるように。TODO(T-90)）
+    // （レッドゾーンにいるハンドラや、SP!で範囲外にした後のハンドラが、深さを増やさない命令を実行できるように。T-90）
     d -= e.pop; if (e.pop > 0 && d < 0) note(EXC.DSTACK_UNDER, inst.slot);
     d += e.push; if (e.push > e.pop && d > th.dcap) note(EXC.DSTACK_OVER, inst.slot);
     r -= e.rpop; if (e.rpop > 0 && r < 0) note(EXC.RSTACK_UNDER, inst.slot);
