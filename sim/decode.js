@@ -15,13 +15,15 @@ export function signExtend(v, bits) {
  *   insts: Array<{slot:number, op:number, sub?:number, imm?:number, offset?:number}>,
  *   litCount: number,           // この語が消費する定数語（LIT・PCREL）の数
  *   fault: null | {exc:number, slot:number},  // フェッチ時に検出する例外（4または5）
- *   end: 'normal' | 'branch' | 'ret' | 'last',
+ *   end: 'normal' | 'branch' | 'ret',
  * }}
  * - 分岐（JMP/JZ/CALL）は語の残りをオフセットにする（offsetは語単位、符号付き）。
  * - RET・RETIの後ろのスロットは実行しないので、そこで打ち切る。
  * - 語の最後に置く命令（EXEC、SYSCALL、拡張命令、SP!、RP!）は、後ろのスロット
- *   （slot6を含む）がすべてNOPでなければ配置違反（例外5）。
- * - slot6は、途中で打ち切られなかったときだけ insts の最後に入る（NOPも含む）。
+ *   （slot6を含む）がすべてNOPでなければ配置違反（例外5。T-02）。
+ *   後ろのNOPも insts に入れる（埋め草のNOPも1回の番を使う。T-10）。
+ *   EXEC・SYSCALLのように制御が移る命令では、実行側が残りを実行しない。
+ * - slot6は、分岐・RET・RETIで打ち切られなかったときに insts の最後に入る（NOPも含む）。
  */
 export function decodeWord(word) {
   word >>>= 0;
@@ -62,11 +64,7 @@ export function decodeWord(word) {
         }
         if (s.operand === 'word') litCount++;
         insts.push(imm === undefined ? { slot: i, op, sub: v } : { slot: i, op, sub: v, imm });
-        if (s.last) {
-          if (!restIsNop(i + width)) fault = { exc: EXC.PLACEMENT, slot: i };
-          end = 'last';
-          break;
-        }
+        if (s.last && !restIsNop(i + width)) { fault = { exc: EXC.PLACEMENT, slot: i }; break; }
         if (s.endsWord) { end = 'ret'; break; }
         i += width;
         continue;
@@ -78,11 +76,7 @@ export function decodeWord(word) {
 
     if (op === OP.LIT) litCount++;
     insts.push({ slot: i, op });
-    if (info.last) {
-      if (!restIsNop(i + 1)) fault = { exc: EXC.PLACEMENT, slot: i };
-      end = 'last';
-      break;
-    }
+    if (info.last && !restIsNop(i + 1)) { fault = { exc: EXC.PLACEMENT, slot: i }; break; }
     if (info.endsWord) { end = 'ret'; break; }
     i++;
   }

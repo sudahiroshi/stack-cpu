@@ -22,7 +22,7 @@ npm run serve   # http://localhost:8000/ui/ をブラウザで開く
 
 ## 状況
 
-段階1（アセンブラ）まで完了。実装は CLAUDE.md の「実装の順番」に沿って進める。
+段階2（1スレッドの命令実行）まで完了。実装は CLAUDE.md の「実装の順番」に沿って進める。
 
 ```sh
 npm run asm -- examples/01_sum.asm                     # リスティングを表示
