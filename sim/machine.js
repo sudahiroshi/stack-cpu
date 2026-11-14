@@ -65,6 +65,12 @@ export class Machine {
      * @type {null | ((th: Thread) => any)}
      */
     this.breakHook = null;
+    /**
+     * 外からUARTの受信データが入りうるか（UIでは true）。true なら、UARTの受信（イベント4）を WAIT で待つスレッドは
+     * いずれ起きうるとみなし、止まったと判定しない（時間は進む）。テストやコマンドラインでは false（受信待ちのデータがなければ止まる）。
+     * true のときは、入力が来るまで終わらないので、runUntilStop・Debugger.run には必ず上限を付けて呼ぶ。
+     */
+    this.hostInput = false;
     /** デバッガのフック：例外の入口の処理（または二重例外での停止）のあとに呼ぶ（th, 例外番号） */
     this.exceptionHook = null;
     this.reset();
@@ -157,7 +163,8 @@ export class Machine {
    */
   #deviceMayWake(th) {
     if (th.state !== S.WAIT) return false;
-    const future = (1 << EV.VSYNC) | (this.timer.armed(th.tid) ? 1 << EV.TIMER : 0) | this.uart.pendingEvents;
+    const future = (1 << EV.VSYNC) | (this.timer.armed(th.tid) ? 1 << EV.TIMER : 0) | this.uart.pendingEvents
+      | (this.hostInput ? 1 << EV.UART_RX : 0);
     return (th.peek(0) & future) !== 0;
   }
 

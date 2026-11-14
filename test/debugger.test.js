@@ -276,3 +276,23 @@ test('peekWord：副作用なしに語を読む（I/Oと割り当てのない番
   assert.equal(peekWord(m, 0xFF00_0000), null);
   assert.equal(peekWord(m, ORG + 2), null);
 });
+
+// ---------------------------------------------------------------- UIからの入力（hostInput）
+
+test('UIでは、UARTの受信を待つスレッドがいれば止まらず、後から入力した文字で進む（hostInput）', () => {
+  const src = 'start: PUSH #16\nWAIT\nLD $FF000000\nHALT';   // UARTの受信を待ってから読む
+  // テストやコマンドライン（hostInput なし）では、起こすものがないので止まる
+  let { dbg } = setup(src);
+  assert.equal(dbg.run({ maxCycles: 100_000 }).type, 'stopped');
+  // UI（hostInput あり）では止まらず、時間が進む
+  const s = setup(src);
+  s.m.hostInput = true;
+  const c0 = s.m.cycle;
+  assert.equal(s.dbg.run({ maxCycles: 100_000 }).type, 'limit');
+  assert.equal(s.m.cycle, c0 + 100_000);
+  assert.equal(s.th(0).state, S.WAIT);
+  // 入力すると、その文字を読んで進む
+  s.m.uart.receive('A');
+  assert.equal(s.dbg.run({ maxCycles: 100_000 }).type, 'stopped');
+  assert.deepEqual(s.th(0).dataStack(), [16, 0x41]);
+});

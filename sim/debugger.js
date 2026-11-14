@@ -96,6 +96,7 @@ export class Debugger {
 
   /**
    * 通常の実行。ブレークポイント、例外、書き込みの見張り、すべての停止、上限で止まる。
+   * Machine.hostInput が true（UI）のときは、UARTの入力を待つスレッドがいると止まらないので、maxCycles を付けて呼ぶ。
    * @param {{ maxCycles?: number, maxIssues?: number }} [opts]  maxIssues：発行の回数の上限（「ゆっくり」の実行用）
    */
   run({ maxCycles = Infinity, maxIssues = Infinity } = {}) {

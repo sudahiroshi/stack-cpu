@@ -144,11 +144,14 @@ function frame(now) {
       target -= done;
       if (r.type !== 'limit') break;
       if (performance.now() - t0 > FRAME_MS) break;
+      if (done === 0) break;   // 進まなければ（念のため）抜ける
     }
     ui.lagging = budget > session.m.cfg.clockMHz * 1000 * 50;   // 50ms以上遅れている
     if (ui.lagging) budget = 0;
   } else if (ui.speed === 'max') {
-    do { r = d.run({ maxCycles: 50_000 }); } while (r.type === 'limit' && performance.now() - t0 < FRAME_MS);
+    // 時間の上限に加えて回数の上限も付ける（時計が進まない環境でも1フレームで終わるように）
+    let n = 0;
+    do { r = d.run({ maxCycles: 50_000 }); } while (r.type === 'limit' && performance.now() - t0 < FRAME_MS && ++n < 400);
   } else {
     budget += (dt / 1000) * ui.slowRate;
     const k = Math.floor(budget);
@@ -431,7 +434,10 @@ function render() {
   $('st-cycle').textContent = m.cycle.toLocaleString();
   $('st-time').textContent = m.microseconds.toLocaleString();
   $('st-lag').hidden = !(ui.running && ui.lagging);
-  $('st-reason').textContent = ui.running ? '実行中…' : (ui.reason?.type === 'pause' ? '一時停止' : V.reasonText(ui.reason));
+  // 動けるスレッドがなく、UARTの受信を待っているだけなら「入力待ち」
+  $('st-reason').textContent = ui.running
+    ? (m.running ? '実行中…' : '入力を待っています（UART）')
+    : (ui.reason?.type === 'pause' ? '一時停止' : V.reasonText(ui.reason));
 
   // スレッド
   $('thread-list').innerHTML = V.threadListHTML(session, ui);

@@ -108,6 +108,7 @@ export class Session {
         th.up = p.up >>> 0;
       }
     }
+    m.hostInput = true;   // UIでは、利用者がいつでもUARTに入力できる
     this.m = m;
     this.dbg = new Debugger(m);
     this.dbg.breakpoints = this.breakpoints;
