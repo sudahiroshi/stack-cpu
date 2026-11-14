@@ -4,7 +4,7 @@
 ; $FFFF0000  リセット時の入口（全スレッド共通）
 ;            TID が 0 なら boot、それ以外は idle
 ; $FFFF0100  例外ベクタ（VBR＋番号×4、番号0〜18）
-;            0〜3   スタックのあふれ  → 退避・回復して RTI
+;            0〜3   スタックのあふれ  → 当面は回復せず、FAULTとして扱う（T-43）
 ;            4〜7   致命的            → FAULT をカーネルへ送って停止
 ;            8      SYSCALL           → EXIT / DPUTC / DGETC / MONITOR
 ;            9      BKPT              → モニタ

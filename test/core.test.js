@@ -312,7 +312,7 @@ test('HALT', () => {
 test('CSR@：構成の値（9K）', () => {
   assert.deepEqual(stackOf('MFC 0\nMFC 1\nMFC 2\nMFC 3\nMFC 4\nMFC 5\nMFC 6\nMFC 7\nMFC 8\nMFC 10'),
     [ISA_VERSION, 3, 1, 8, 16, 24 * 1024, 8 * 1024 * 1024, 64, 1, RESET.VBR]);
-  assert.equal(ISA_VERSION, 0x0007);
+  assert.equal(ISA_VERSION, 0x0008);
 });
 
 test('CSR@：構成の値（20K）', () => {
