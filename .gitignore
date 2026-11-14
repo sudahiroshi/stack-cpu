@@ -1,4 +1,25 @@
+# 依存パッケージ（現状は依存なし）
 node_modules/
+
+# アセンブラの出力（tools/asm.js の -o、--hex、--list）
 *.bin
 *.hex
+*.lst
 out/
+
+# テストのカバレッジ（node --test --experimental-test-coverage など）
+coverage/
+
+# ログ
+npm-debug.log*
+*.log
+
+# macOS
+.DS_Store
+._*
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*~
