@@ -312,7 +312,7 @@ test('HALT', () => {
 test('CSR@：構成の値（9K）', () => {
   assert.deepEqual(stackOf('MFC 0\nMFC 1\nMFC 2\nMFC 3\nMFC 4\nMFC 5\nMFC 6\nMFC 7\nMFC 8\nMFC 10'),
     [ISA_VERSION, 3, 1, 8, 16, 24 * 1024, 8 * 1024 * 1024, 64, 1, RESET.VBR]);
-  assert.equal(ISA_VERSION, 0x0006);
+  assert.equal(ISA_VERSION, 0x0007);
 });
 
 test('CSR@：構成の値（20K）', () => {
@@ -353,7 +353,7 @@ test('一般モード：CSR@ #0〜#9 はよい、#10以降とCSR!は例外6', ()
   let e = excOf('MFC 9\nl: MFC 10', { mode: 0 });
   assert.equal(e.exc, EXC.PRIVILEGE);
   assert.equal(e.epc, ORG + 4);
-  assert.deepEqual(e.r.stack, [0]);
+  assert.deepEqual(e.r.stack, [0x20]);   // EVPEND：UARTの送信FIFOに空き（ビット5）
   e = excOf('PUSHQ #0\nMTC 16', { mode: 0 });
   assert.equal(e.exc, EXC.PRIVILEGE);
   for (const src of ['PUSH #$00104000\nPOP U', 'PUSHQ #0\nPOP SP', 'PUSHQ #0\nPOP RP', 'HALT', 'PUSHQ #0\nPSHR\nRTI']) {
@@ -489,7 +489,7 @@ test('バスエラー（例外11）', () => {
   assert.equal(excOf('LD $00106000').exc, EXC.BUS);            // ローカルの窓のうち容量（24KB）の外（T-14）
   assert.equal(excOf('LD $00110000').exc, EXC.BUS);            // 9Kにはコア1がない
   assert.equal(excOf('LD $01800000').exc, EXC.BUS);            // 外部RAMの外
-  assert.equal(excOf('LD $FF000000').exc, EXC.BUS);            // 未登録のI/O
+  assert.equal(excOf('LD $FF050000').exc, EXC.BUS);            // 未登録のI/O（キーボード・マウスの予約領域）
   assert.equal(excOf('LD $FFFF1000').exc, EXC.BUS);            // ROMの外
   const e = excOf('PUSHQ #0\nST $00106000');
   assert.equal(e.exc, EXC.BUS);
@@ -508,13 +508,14 @@ test('ブートROMへの書き込みは例外12、読み出しはできる', () 
 
 test('I/Oへの8bitアクセスは、8bitを許すデバイスだけ（T-16）', () => {
   const setup = m => {
-    m.mem.mapDevice(0xFF00_2000, { name: '32bitだけ', size: 0x10, read32: () => 0x1234, write32: () => {} });
-    m.mem.mapDevice(0xFF01_0000, { name: '8bitも', size: 0x10, read32: () => 0, write32: () => {}, read8: off => off + 0x40, write8: () => {} });
+    // 予約領域（キーボード・マウス、記憶装置）に試験用のデバイスを置く
+    m.mem.mapDevice(0xFF05_0000, { name: '32bitだけ', size: 0x10, read32: () => 0x1234, write32: () => {} });
+    m.mem.mapDevice(0xFF06_0000, { name: '8bitも', size: 0x10, read32: () => 0, write32: () => {}, read8: off => off + 0x40, write8: () => {} });
   };
-  assert.deepEqual(stackOf('LD $FF002000\nPUSH #$FF010003\nLDB', { setup }), [0x1234, 0x43]);
-  const e = excOf('PUSH #$FF002000\nLDB\nHALT', { setup });
+  assert.deepEqual(stackOf('LD $FF050000\nPUSH #$FF060003\nLDB', { setup }), [0x1234, 0x43]);
+  const e = excOf('PUSH #$FF050000\nLDB\nHALT', { setup });
   assert.equal(e.exc, EXC.ALIGN);
-  assert.equal(excOf('PUSHQ #0\nPUSH #$FF002000\nSTB\nHALT', { setup }).exc, EXC.ALIGN);
+  assert.equal(excOf('PUSHQ #0\nPUSH #$FF050000\nSTB\nHALT', { setup }).exc, EXC.ALIGN);
 });
 
 test('命令フェッチは自コアのローカルBSRAMとブートROMからだけ（例外7）', () => {

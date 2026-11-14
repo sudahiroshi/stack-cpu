@@ -100,7 +100,8 @@ test('ラッチは立ったまま残り、WAIT はすぐに戻る。2回目は�
 
 test('WAIT が返すのは mask 内の立っているビットだけ', () => {
   const r = runThreads('a: PUSHQ #0\nSIGNAL\nPUSHQ #6\nWAIT\nMFC 9\nHALT', { threads: { 0: 'a' } });
-  assert.deepEqual(r.m.thread(0).dataStack(), [2, 0]);
+  // EVPENDに残るのは、UARTの送信FIFOに空きあり（ビット5、状態）だけ
+  assert.deepEqual(r.m.thread(0).dataStack(), [2, 0x20]);
 });
 
 test('SIGNAL の tid＝−1 は自分を含む全スレッド（T-27）', () => {
@@ -298,8 +299,8 @@ sender: ${delay('l', 5)}
         HALT`;
   const r = runThreads(src, { threads: { 0: 'sender', 1: 'recver' } });
   assert.equal(r.m.thread(0).lastException, null);
-  // WAITの結果1、EVPEND 1（まだ空でない）、ヘッダ、EVPEND 0（空になった）
-  assert.deepEqual(r.m.thread(1).dataStack(), [1, 1, 0x0000_0000, 0]);
+  // WAITの結果1、EVPEND 1（まだ空でない）、ヘッダ、EVPEND 0（空になった）。EVPENDにはUARTのビット5（送信FIFOに空き）も立つ
+  assert.deepEqual(r.m.thread(1).dataStack(), [1, 0x21, 0x0000_0000, 0x20]);
 });
 
 // ---------------------------------------------------------------- 時間のかかる操作

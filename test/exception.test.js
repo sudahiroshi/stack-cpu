@@ -257,8 +257,11 @@ test('一般モード：I/Oはユーザーページ以外アクセスできな�
   assert.equal(run('LD $FF080000', { mode: 0 }).exc.exc, EXC.PROTECT);   // 保護キー表
   assert.equal(run('LD $FF000000', { mode: 0 }).exc.exc, EXC.PROTECT);   // UART（未登録でも12）
   assert.equal(run('PUSHQ #0\nPUSH #$FF080000\nSTB', { mode: 0 }).exc.exc, EXC.PROTECT);
-  // ユーザーページは一般モードからアクセスできる（デバイスは段階5なので、いまはバスエラー）
-  assert.equal(run(`LD $${IO.USERPAGE.toString(16)}`, { mode: 0 }).exc.exc, EXC.BUS);
+  // ユーザーページは一般モードからアクセスできる（割り当てのないオフセットはバスエラー）
+  assert.equal(run(`LD $${(IO.USERPAGE + 0x14).toString(16)}`, { mode: 0 }).exc.exc, EXC.BUS);
+  const joy = run(`LD $${(IO.USERPAGE + 0x10).toString(16)}\nTRAP`, { mode: 0, setup: (m, th) => { grantUserKey(m, th); m.gpio.joy = 0x1234; } });
+  assert.equal(joy.exc.exc, EXC.SYSCALL);   // JOYを読めて、次のSYSCALLまで進んだ
+  assert.deepEqual(joy.stack, [0x1234]);
 });
 
 test('特権モードはキーを検査しない', () => {

@@ -8,12 +8,21 @@
 //     （ただしDより早くはならない）。待っている間の THREADSTAT は5（T-84）。
 //   - 待機中（WAIT・RECV・SEND）のスレッドは、起きる条件が成り立てば実行可能になり、同じ命令をもう一度実行する。
 //   - 20Kでは、1サイクルごとにコア0、コア1の順に1回ずつ進める（T-23）。
+//
+// デバイス（段階5）
+//   - 時間で動くもの（UARTの送受信、タイマの比較、VSYNC）は、各デバイスの update(cycle) が
+//     「次に何かが起きるサイクル」を返し、そのサイクルに達したときだけ進める。1サイクルの中では、デバイスを先に進める。
+//   - runUntilStop は、全スレッドが待っているとき、次のデバイスの出来事まで時間を早送りする（結果は1サイクルずつ進めたときと同じ）。
 import { makeConfig } from './config.js';
 import { Memory } from './memory.js';
 import { Thread } from './thread.js';
 import { issue, canSend } from './core.js';
 import { SYS, EV, IO } from './isa.js';
 import { KeyTable } from './devices/keytable.js';
+import { Uart } from './devices/uart.js';
+import { Timer } from './devices/timer.js';
+import { Gpio, UserPage, ThreadControl } from './devices/gpio.js';
+import { Video } from './devices/video.js';
 import { THREAD_STATE } from './devices/registers.js';
 
 const S = THREAD_STATE;
@@ -32,8 +41,23 @@ export class Machine {
       last: this.cfg.nthreads - 1,  // 前に発行したスレッド（次はその次から探す）
       dividerFreeAt: 0,             // 除算器が空くサイクル
     }));
-    // デバイスが表す「状態」のイベントビット（UART。段階5）。全スレッドに共通
-    this.statusEvents = 0;
+    // I/Oデバイス（12.1節）
+    this.uart = new Uart(this);
+    this.timer = new Timer(this);
+    this.gpio = new Gpio(this);
+    this.video = new Video(this);
+    this.threadControl = new ThreadControl(this);
+    this.userPage = new UserPage(this);
+    this.mem.mapDevice(IO.UART, this.uart);
+    this.mem.mapDevice(IO.TIMER, this.timer);
+    this.mem.mapDevice(IO.GPIO, this.gpio);
+    this.mem.mapDevice(IO.VIDEO, this.video);
+    this.mem.mapDevice(IO.THREAD, this.threadControl);
+    this.mem.mapDevice(IO.VRAM, this.video.vramDevice);
+    this.mem.mapDevice(IO.FONT, this.video.fontDevice);
+    this.mem.mapDevice(IO.USERPAGE, this.userPage);
+    /** 時間で動くデバイス（update(cycle) を持つもの） */
+    this.timedDevices = [this.uart, this.timer, this.video];
     this.listeners = new Set(); // UIやトレース用のフック。イベント：{ type: 'exec' | 'block' | 'exception', ... }
     this.reset();
   }
@@ -43,6 +67,8 @@ export class Machine {
     this.cycle = 0; // 仮想時間（サイクル数）
     for (const th of this.threads) th.reset();
     this.keytable.reset(); // 全ページがキー0（11.1節）
+    for (const d of [this.uart, this.timer, this.gpio, this.video, this.threadControl, this.userPage]) d.reset();
+    this.nextDeviceCycle = 0; // 次にデバイスを進めるサイクル
     for (const core of this.cores) {
       core.last = this.cfg.nthreads - 1;
       core.dividerFreeAt = 0;
@@ -93,9 +119,39 @@ export class Machine {
    * ラッチ式のビット＋状態のビット（0＝メールボックスが空でない、4・5＝UART）
    */
   pendingEvents(th) {
-    let e = th.events | this.statusEvents;
+    let e = th.events | this.uart.statusEvents;
     if (th.mbox.length > 0) e |= 1 << EV.MAILBOX;
     return e >>> 0;
+  }
+
+  /** デバイスの「状態」のイベントビット（UART。全スレッドに共通） */
+  get statusEvents() {
+    return this.uart.statusEvents;
+  }
+
+  /** デバイスが cycle に何かをすることを知らせる（その時刻にデバイスを進める） */
+  scheduleDevice(cycle) {
+    if (cycle < this.nextDeviceCycle) this.nextDeviceCycle = cycle;
+  }
+
+  #updateDevices() {
+    let next = Infinity;
+    for (const d of this.timedDevices) next = Math.min(next, d.update(this.cycle));
+    this.nextDeviceCycle = next;
+  }
+
+  /**
+   * 待機中のスレッドを、今後デバイスの出来事が起こしうるか（runUntilStop の早送りの判定）。
+   * VSYNCは毎フレーム、タイマは比較を開始していれば、UARTは受信データや送信中のバイトがあれば起きる。
+   */
+  #deviceMayWake(th) {
+    if (th.state !== S.WAIT) return false;
+    const future = (1 << EV.VSYNC) | (this.timer.armed(th.tid) ? 1 << EV.TIMER : 0) | this.uart.pendingEvents;
+    return (th.peek(0) & future) !== 0;
+  }
+
+  #anyDeviceMayWake() {
+    return this.threads.some(th => this.#deviceMayWake(th));
   }
 
   /** デバイスのイベントを全スレッドのラッチに立てる（6.4節。VSYNCなど） */
@@ -151,6 +207,7 @@ export class Machine {
    * @returns {boolean} どれかのコアで命令を発行したか
    */
   step() {
+    if (this.cycle >= this.nextDeviceCycle) this.#updateDevices();
     let issued = false;
     for (const core of this.cores) if (this.#stepCore(core)) issued = true;
     this.cycle++;
@@ -162,6 +219,15 @@ export class Machine {
     for (let i = 0; i < n; i++) this.step();
   }
 
+  /** 動いているスレッドが次に発行できる最も早いサイクル（いまのサイクルで発行できればいまのサイクル） */
+  #nextIssueCycle() {
+    let t = Infinity;
+    for (const th of this.threads) {
+      if (this.isActive(th)) t = Math.min(t, Math.max(this.cycle, th.readyCycle));
+    }
+    return t;
+  }
+
   /** 止まっていないスレッドがあるか */
   get running() {
     return this.threads.some(th => this.isActive(th));
@@ -169,15 +235,30 @@ export class Machine {
 
   /**
    * 止まっていないスレッドがなくなるまで（または maxCycles サイクルまで）進める。
-   * 待機中で起きる見込みのないスレッド（デバイスのイベントは段階5）は止まっているとみなす。
+   * 待機中で、他のスレッドもデバイスも起こす見込みのないスレッドは止まっているとみなす。
    * @returns {{ cycles: number, stopped: boolean, blocked: number[] }}
-   *   stopped：すべて止まったか、blocked：待機したまま止まったスレッドのtid
+   *   stopped：すべて止まったか（動けるスレッドがなく、デバイスが起こす見込みもない）。
+   *   maxCycles で打ち切ったときは false。blocked：待機中のスレッドのtid
    */
   runUntilStop(maxCycles = 10_000_000) {
     const start = this.cycle;
-    while (this.running && this.cycle - start < maxCycles) this.step();
+    const end = start + maxCycles;
+    while (this.cycle < end) {
+      if (this.running) {
+        // 発行できるスレッドがなければ、次に発行できるサイクルかデバイスの出来事まで早送りする
+        const t = this.#nextIssueCycle();
+        if (t > this.cycle) this.cycle = Math.min(t, this.nextDeviceCycle, end);
+        if (this.cycle >= end) break;
+        this.step();
+        continue;
+      }
+      if (!this.#anyDeviceMayWake()) break;
+      this.cycle = Math.max(this.cycle, Math.min(this.nextDeviceCycle, end));
+      if (this.cycle >= end) break;
+      this.step();
+    }
     const blocked = this.threads.filter(th => [S.WAIT, S.RECV, S.SEND].includes(th.state)).map(th => th.tid);
-    return { cycles: this.cycle - start, stopped: !this.running, blocked };
+    return { cycles: this.cycle - start, stopped: !this.running && !this.#anyDeviceMayWake(), blocked };
   }
 
   /** 経過時間（マイクロ秒、仮想時間） */

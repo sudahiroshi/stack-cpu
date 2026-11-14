@@ -23,6 +23,7 @@ export class Thread {
 
   /** リセット時の状態（11.1節）。スタック用RAMの中身は消さない */
   reset() {
+    this.generation = (this.generation ?? 0) + 1; // リセットした回数（実行中の命令が自分をリセットしたかの判定用）
     this.pc = RESET.PC;          // 次にフェッチする語のアドレス
     this.mode = 1;               // 1＝特権
     this.depth = 0;              // データスタックの深さ（SP）。SP!で範囲外になりうる（T-13）

@@ -170,9 +170,11 @@ function depthFaults(th, insts) {
 export function issue(m, th) {
   if (!th.dec && !fetch(m, th)) return false;
   const inst = th.dec.insts[th.idx];
+  const gen = th.generation;
   let r;
   try {
     r = execute(m, th, inst);
+    if (th.generation !== gen) return false; // THREADCTLで自分自身をリセットした
   } catch (e) {
     if (!(e instanceof CpuException)) throw e;
     raise(m, th, e.exc, {

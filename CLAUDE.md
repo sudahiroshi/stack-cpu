@@ -39,7 +39,8 @@ sim/         シミュレータ本体（DOM非依存）
   core.js      フェッチ時の判定と命令の実行
   decode.js    命令語のデコードと配置規則の検査（アセンブラと共有）
   cpu-exception.js  CPUの例外を内部で伝える例外クラス
-  devices/     UART、タイマ、GPIO、画面、スレッド制御、保護キー表（keytable.js）
+  devices/     uart.js、timer.js、gpio.js（GPIO・ユーザーページ・スレッドの制御）、video.js（画面・VRAM・フォント）、
+               font8x16.js（自作フォント）、keytable.js（保護キー表）、registers.js（I/Oのオフセット）
 asm/         アセンブラ（DOM非依存）
   mnemonics.js Forth風・レジスタ風の名前の対応表とマクロ
   assembler.js アセンブラ本体
@@ -72,7 +73,7 @@ npm run serve                 # http://localhost:8000/ui/ でUIを開く
 
 UIは段階2以降、必要に応じて少しずつ作る。**シミュレータの画面（UI）の仕様はまだ決まっていない**ので、大きなUIを作る前にユーザーと相談する。
 
-現在の状況：**段階4（例外、スタック深さの判定、保護キー）完了**。次は段階5。
+現在の状況：**段階5（周辺回路）完了**。次は段階6。
 
 ## 間違えやすい仕様（実装時のチェックリスト）
 
