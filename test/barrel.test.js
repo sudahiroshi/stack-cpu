@@ -355,3 +355,23 @@ test('待ち時間は構成で変えられる', () => {
   const r = runThreads('a: LD $01000000\nl: HALT', { config: { ...new Machine('9K').cfg, extRamLatency: 20 }, threads: { 0: 'a' }, trace: true });
   assert.deepEqual(execs(r.events, 0).map(e => e.cycle).slice(0, 3), [0, 4, 24]);
 });
+
+test('resetThread（THREADCTL）：メールボックスを空にし、送信の待ちを取り消す（T-87）', () => {
+  const src = `
+a:      PUSHQ #8
+        PUSHQ #3
+        SEND 0
+        HALT`;
+  const setup = m => { m.thread(3).mbox = new Array(64).fill(0); };
+  const r = runThreads(src, { threads: { 1: 'a', 2: 'a' }, setup });
+  const m = r.m;
+  assert.deepEqual(m.thread(3).sendQueue, [1, 2]);
+  // 送信を待っているスレッド1をリセット：待ち行列から外れる
+  m.resetThread(1);
+  assert.deepEqual(m.thread(3).sendQueue, [2]);
+  assert.equal(m.thread(1).state, S.RESET);
+  // 受信側のスレッド3をリセット：受信FIFOは空になるが、送信の待ち行列（スレッド2）は残る
+  m.resetThread(3);
+  assert.deepEqual(m.thread(3).mbox, []);
+  assert.deepEqual(m.thread(3).sendQueue, [2]);
+});

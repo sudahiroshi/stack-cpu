@@ -40,7 +40,7 @@ export class Thread {
     this.busyUntil = 0;          // 実行中の時間のかかる操作（外部RAM、除算）が終わるサイクル
 
     // メールボックス（10章）。受信用のFIFO（深さMBOXDEPTH）と、このスレッドへの送信を待っているスレッドのtid（待ち始めた順。T-28）
-    // TODO(T-87): THREADCTLでスレッドをリセットしたときにメールボックスを空にするか
+    // リセットで空にする（T-87）
     this.mbox = [];
     this.sendQueue = [];
 

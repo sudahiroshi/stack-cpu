@@ -301,7 +301,7 @@ test('HALT', () => {
 test('CSR@：構成の値（9K）', () => {
   assert.deepEqual(stackOf('MFC 0\nMFC 1\nMFC 2\nMFC 3\nMFC 4\nMFC 5\nMFC 6\nMFC 7\nMFC 8\nMFC 10'),
     [ISA_VERSION, 3, 1, 8, 16, 24 * 1024, 8 * 1024 * 1024, 64, 1, RESET.VBR]);
-  assert.equal(ISA_VERSION, 0x0004);
+  assert.equal(ISA_VERSION, 0x0005);
 });
 
 test('CSR@：構成の値（20K）', () => {
@@ -443,14 +443,14 @@ test('スタック深さはフェッチ時に判定し、違反した語は実�
   assert.equal(e.r.rstack.length, 12);
 });
 
-test('slot6 の DUP もスタック深さの判定に入る（TODO(T-01)）', () => {
+test('slot6 の DUP もスタック深さの判定に入る（T-01）', () => {
   // 深さ16で、slot6がDUPの語
   const r = runWords([W([0, 0, 0, 0, 0, 0], 3)], { setup: (m, th) => { th.depth = 16; } });
   assert.equal(r.exc.exc, EXC.DSTACK_OVER);
   assert.equal(r.exc.eslot, 6);
 });
 
-test('優先順位：例外4は例外6より先（TODO(T-32)）', () => {
+test('優先順位：例外4は例外6より先（T-32）', () => {
   assert.equal(excOf('PUSHQ #0\nMTC 0', { mode: 0 }).exc, EXC.ILLEGAL);
 });
 
@@ -524,7 +524,7 @@ test('他コアのローカルBSRAMへのXCHGは例外13（20K）', () => {
   assert.deepEqual(stackOf('PUSHQ #5\nST $00110000\nLD $00110000', { config: '20K' }), [5]);
 });
 
-test('分岐先が32bitの範囲外になったら例外7（TODO(T-80)）', () => {
+test('分岐先が32bitの範囲外になったら例外7（T-80）', () => {
   // ORG（0x0010_0000）から −0x40001語 → −4
   const r = runWords([((OP.JMP << 27) | (-0x40001 & 0x7FF_FFFF)) >>> 0]);
   assert.equal(r.exc.exc, EXC.FETCH);

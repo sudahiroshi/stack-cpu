@@ -5,7 +5,7 @@
 //     リセット直後はスレッド0から探す（T-22）。発行できるスレッドがなければ空サイクル。
 //   - 同じスレッドはD（pipelineDepth）サイクル以上あけて発行する。
 //   - 時間のかかる操作（外部RAM、他コアのローカルBSRAM、除算器）は、完了するまで次の発行を待たせる
-//     （ただしDより早くはならない）。待っている間の THREADSTAT は5。TODO(T-84)
+//     （ただしDより早くはならない）。待っている間の THREADSTAT は5（T-84）。
 //   - 待機中（WAIT・RECV・SEND）のスレッドは、起きる条件が成り立てば実行可能になり、同じ命令をもう一度実行する。
 //   - 20Kでは、1サイクルごとにコア0、コア1の順に1回ずつ進める（T-23）。
 import { makeConfig } from './config.js';
@@ -42,6 +42,22 @@ export class Machine {
       core.last = this.cfg.nthreads - 1;
       core.dividerFreeAt = 0;
     }
+  }
+
+  /**
+   * 1つのスレッドをリセット状態にする（THREADCTL。11.5節）。
+   * メールボックスを空にし、そのスレッドが送信を待っていれば待ちを取り消す（T-87）。
+   */
+  resetThread(tid) {
+    const th = this.thread(tid);
+    for (const t of this.threads) {
+      const i = t.sendQueue.indexOf(tid);
+      if (i >= 0) t.sendQueue.splice(i, 1);
+    }
+    // このスレッドへの送信を待っている他のスレッドの順番（T-28）は残す
+    const waiting = th.sendQueue;
+    th.reset();
+    th.sendQueue = waiting;
   }
 
   /** すべてのスレッド（コア0から順） */

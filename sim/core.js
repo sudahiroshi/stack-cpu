@@ -5,7 +5,7 @@
 //
 // 語のフェッチは、その語の最初の番で行い、次の判定をする（7.1節）。
 //   例外7（フェッチ違反）、4（不正命令、存在しないCSR、読み出し専用のCSRへのCSR!）、5（配置違反）、
-//   6（特権違反）、0〜3（スタック深さ）、9（BRK）。同時に起きたときはこの順（TODO(T-32)）。
+//   6（特権違反）、0〜3（スタック深さ）、9（BRK）。同時に起きたときはこの順（T-32）。
 //
 // 段階2では、例外が起きたら記録してスレッドを止める（raise）。例外の入口は段階4で作る。
 //
@@ -23,7 +23,7 @@ import { THREAD_STATE } from './devices/registers.js';
 
 const TRUE = 0xFFFFFFFF;
 const CSR_EXISTS_MAX = 21; // 22・23は予約、24〜31は存在しない → 例外4
-const FETCH_PRIORITY = [   // TODO(T-32)
+const FETCH_PRIORITY = [   // T-32
   EXC.FETCH, EXC.ILLEGAL, EXC.PLACEMENT, EXC.PRIVILEGE,
   EXC.DSTACK_OVER, EXC.DSTACK_UNDER, EXC.RSTACK_OVER, EXC.RSTACK_UNDER, EXC.BREAK,
 ];
@@ -113,7 +113,7 @@ function fetch(m, th) {
 
 /**
  * スタック深さの判定（6.2.1節、7.1節）。語の命令の増減を累積し、途中の最大・最小で判定する。
- * slot6も含める（TODO(T-01)）。SP!・RP!で範囲外の深さになっていれば、ここで例外になる（T-13）。
+ * slot6も含める（T-01）。SP!・RP!で範囲外の深さになっていれば、ここで例外になる（T-13）。
  */
 function depthFaults(th, insts) {
   const found = new Map();
@@ -192,7 +192,7 @@ function jump(th, target) {
   return JUMP;
 }
 
-/** 分岐先＝語のアドレス＋オフセット×4。32bitで一周しない（T-03）。範囲外は例外7（TODO(T-80)） */
+/** 分岐先＝語のアドレス＋オフセット×4。32bitで一周しない（T-03）。範囲外は例外7（T-80） */
 function branchTarget(th, inst) {
   const t = th.wordAddr + inst.offset * 4;
   if (t < 0 || t > 0xFFFFFFFF) throw new CpuException(EXC.FETCH, th.wordAddr);
@@ -322,7 +322,7 @@ function executeSys(m, th, inst, ctx) {
       const qi = target.sendQueue.indexOf(th.tid);
       if (qi >= 0) target.sendQueue.splice(qi, 1);
       th.pop();                                // tid
-      const tag = th.pop() & 0xFFFF;            // 下位16bitを使う（TODO(T-86)）
+      const tag = th.pop() & 0xFFFF;            // 下位16bitを使う（T-86）
       const data = [];
       for (let k = 0; k < n; k++) data.unshift(th.pop());
       // ヘッダ：送信元tid（31〜24）、tag（23〜8）、予備0（7〜4）、n（3〜0）（10.3節）
@@ -413,7 +413,7 @@ function executeSys(m, th, inst, ctx) {
  * SENDM・SENDM?で、いま送れるか（10.2節）。
  * 相手のFIFOにn＋1語の空きがあり、先に待っているスレッドがいないこと（待ち始めた順に送る。T-28）。
  * SENDMで待っているスレッドは、自分が待ち行列の先頭なら送れる。SENDM?は待ち行列に入らないので、
- * 誰かが待っていれば送れない（TODO(T-85)）。
+ * 誰かが待っていれば送れない（T-85）。
  */
 export function canSend(m, th, target, n, trying) {
   if (target.mbox.length + n + 1 > m.cfg.mboxDepth) return false;
