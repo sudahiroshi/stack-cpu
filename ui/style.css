@@ -12,6 +12,7 @@
   --cur-strong: #ffd34d;
   --bp: #d93838;
   --changed: #c2410c;
+  --changed-bg: #ffe0c2;   /* 直前から変わった値の背景（スタック・メモリ・CSR・メールボックスなどで共通） */
   --red-zone: #fde2e2;
   --ok: #1b8a4b;
   --warn: #b45309;
@@ -31,6 +32,7 @@
     --cur-strong: #8a6d12;
     --red-zone: #3a1f22;
     --changed: #fb923c;
+    --changed-bg: #5a3214;
   }
 }
 * { box-sizing: border-box; }
@@ -126,6 +128,9 @@ td.mono, .mono { font-family: var(--mono); }
 .sitem { display: flex; justify-content: space-between; padding: 0 4px; line-height: 17px; }
 .sitem .k { color: var(--muted); }
 .sitem.changed .v { color: var(--changed); font-weight: 600; }
+.sitem.changed, .chg, tr.chg td { background: var(--changed-bg); }
+.sitem.changed .v, .chg { border-radius: 2px; }
+.thread-table tr.selected td.chg { background: color-mix(in srgb, var(--changed-bg) 70%, var(--accent) 30%); }
 .sitem.red { background: var(--red-zone); }
 .sempty { color: var(--muted); font-size: 11px; padding: 0 4px; }
 .info { padding: 4px 8px 6px; border-top: 1px solid var(--line); font-size: 12px; display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 1px 8px; }

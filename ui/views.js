@@ -7,9 +7,13 @@ const tidText = tid => hex(tid, 2);
 
 /**
  * 画面の表示の状態（ui/main.js が持つ）
- * @typedef {{ selected: number, pinned: Set<number>, style: 'reg'|'forth', offsets: Map<number, number>,
- *             prev: Map<number, { ds: number[], rs: number[] }> }} UiState
+ * @typedef {{ selected: number, pinned: Set<number>, style: 'reg'|'forth', offsets: Map<number, number> }} UiState
+ *
+ * 変わった箇所の強調：Session.takeSnapshot（ステップ・実行を始めたとき）の状態と比べ、変わった値に class="chg" を付ける。
  */
+
+/** 変わっていれば ' chg'（class に足す） */
+const chg = changed => (changed ? ' chg' : '');
 
 /** スレッドの一覧（docs/ui.md 4.1節） */
 export function threadListHTML(s, ui) {
@@ -19,16 +23,17 @@ export function threadListHTML(s, ui) {
     if (multiCore) rows.push(`<tr class="core"><td colspan="7">コア${core.id}</td></tr>`);
     for (const th of core.threads) {
       const t = s.threadSummary(th);
+      const p = s.prev.get(t.tid)?.summary;
       const cls = ['row', t.tid === ui.selected ? 'selected' : ''].join(' ');
       const pinned = ui.pinned.has(t.tid);
       rows.push(`<tr class="${cls}" data-tid="${t.tid}">
         <td><button class="pin ${pinned ? 'on' : ''}" data-act="pin" data-tid="${t.tid}" title="詳細の列に固定">${pinned ? '★' : '☆'}</button></td>
         <td class="mono">${tidText(t.tid)}</td>
-        <td><span class="st st-${t.state}" title="${t.mode}モード">${esc(t.stateName)}</span>${t.mode === '一般' ? '<span class="umode" title="一般モード">U</span>' : ''}</td>
+        <td class="${chg(p && p.state !== t.state).trim()}"><span class="st st-${t.state}" title="${t.mode}モード">${esc(t.stateName)}</span>${t.mode === '一般' ? '<span class="umode" title="一般モード">U</span>' : ''}</td>
         <td class="mono">${hex8(t.pc)}:${t.slot}</td>
-        <td class="mono">${t.depth}</td>
-        <td class="mono">${t.rdepth}</td>
-        <td class="mono">${t.T === null ? '—' : hex8(t.T)}</td>
+        <td class="mono${chg(p && p.depth !== t.depth)}">${t.depth}</td>
+        <td class="mono${chg(p && p.rdepth !== t.rdepth)}">${t.rdepth}</td>
+        <td class="mono${chg(p && p.T !== t.T)}">${t.T === null ? '—' : hex8(t.T)}</td>
       </tr>`);
     }
   }
@@ -85,7 +90,8 @@ export function detailColumnHTML(s, th, ui, { lines = ui.lines ?? 22 } = {}) {
   const off = ui.offsets.get(th.tid) ?? 0;
   const before = Math.floor(lines / 3);
   const rows = s.disasmWindow(currentWord(th) + off * 4, { before, after: lines - before - 1, style: ui.style, th });
-  const prev = ui.prev.get(th.tid);
+  const prev = s.prev.get(th.tid);
+  const evpend = s.m.pendingEvents(th) >>> 0;
   const last = th.lastException;
   const mb = th.mbox.length;
   const canClose = ui.pinned.has(th.tid) && th.tid !== ui.selected;
@@ -100,11 +106,11 @@ export function detailColumnHTML(s, th, ui, { lines = ui.lines ?? 22 } = {}) {
       ${stackHTML('リターンスタック', th.returnStack(), th.rcap, prev?.rs, th.rcap)}
     </div>
     <div class="info">
-      <span class="k">UP</span><span class="v">${hex8(th.up)}</span>
-      <span class="k">EVPEND</span><span class="v">${hex8(s.m.pendingEvents(th))}</span>
-      <span class="k">メールボックス</span><span class="v">${mb}語</span>
+      <span class="k">UP</span><span class="v${chg(prev && prev.up !== th.up >>> 0)}">${hex8(th.up)}</span>
+      <span class="k">EVPEND</span><span class="v${chg(prev && prev.evpend !== evpend)}">${hex8(evpend)}</span>
+      <span class="k">メールボックス</span><span class="v${chg(prev && prev.mbox.length !== mb)}">${mb}語</span>
       <span class="k">命令数</span><span class="v">${th.instret}</span>
-      <span class="k">最後の例外</span><span class="v" style="grid-column: span 3">${last ? `${last.exc} ${esc(EXC_NAMES[last.exc] ?? '')}（EPC ${hex8(last.epc)}、EADDR ${hex8(last.eaddr)}）` : '—'}</span>
+      <span class="k">最後の例外</span><span class="v${chg(prev && prev.lastException !== last)}" style="grid-column: span 3">${last ? `${last.exc} ${esc(EXC_NAMES[last.exc] ?? '')}（EPC ${hex8(last.epc)}、EADDR ${hex8(last.eaddr)}）` : '—'}</span>
     </div>
   </div>`;
 }
@@ -144,19 +150,29 @@ export function gridHTML(s, ui) {
 
 /** CSR（選んだスレッド） */
 export function csrHTML(s, th) {
-  const rows = s.csrList(th).map(c => `<tr><td class="mono">${c.n}</td><td>${c.name}</td><td class="mono">${hex8(c.value)}</td><td class="mono hint">${c.value}</td></tr>`).join('');
+  const prev = s.prev.get(th.tid)?.csr;
+  const rows = s.csrList(th).map((c, i) => {
+    const ch = chg(prev && prev[i] !== c.value);
+    return `<tr><td class="mono">${c.n}</td><td>${c.name}</td><td class="mono${ch}">${hex8(c.value)}</td><td class="mono hint${ch}">${c.value}</td></tr>`;
+  }).join('');
   return `<p class="hint">tid ${tidText(th.tid)}</p><table><thead><tr><th>番号</th><th>名前</th><th>値</th><th>10進</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /** メールボックス（選んだスレッド） */
 export function mboxHTML(s, th) {
   const v = s.mailboxView(th);
-  const rows = v.items.map(i => i.header
-    ? `<tr><td class="mono">${hex8(i.word)}</td><td>ヘッダ：送信元 tid ${tidText(i.src)}、tag ${hex(i.tag, 4)}、${i.n}語</td></tr>`
-    : `<tr><td class="mono">${hex8(i.word)}</td><td class="hint">本文</td></tr>`).join('');
-  return `<p class="hint">tid ${tidText(th.tid)} の受信FIFO（${th.mbox.length}/${s.m.cfg.mboxDepth}語）</p>
+  const p = s.prev.get(th.tid);
+  const firstNew = v.items.length - s.mailboxArrived(th);   // これ以後が、覚えてから届いた語
+  const rows = v.items.map((i, k) => {
+    const cls = chg(k >= firstNew).trim();
+    return i.header
+      ? `<tr class="${cls}"><td class="mono">${hex8(i.word)}</td><td>ヘッダ：送信元 tid ${tidText(i.src)}、tag ${hex(i.tag, 4)}、${i.n}語</td></tr>`
+      : `<tr class="${cls}"><td class="mono">${hex8(i.word)}</td><td class="hint">本文</td></tr>`;
+  }).join('');
+  const waitChanged = p && p.waiting.join() !== v.waiting.join();
+  return `<p class="hint">tid ${tidText(th.tid)} の受信FIFO（<span class="${chg(p && p.mbox.length !== th.mbox.length).trim()}">${th.mbox.length}</span>/${s.m.cfg.mboxDepth}語）</p>
     ${rows ? `<table><tbody>${rows}</tbody></table>` : '<p class="hint">（空）</p>'}
-    <p class="hint">このスレッドへの送信を待っているスレッド：${v.waiting.length ? v.waiting.map(tidText).join('、') : 'なし'}</p>`;
+    <p class="hint">このスレッドへの送信を待っているスレッド：<span class="${chg(waitChanged).trim()}">${v.waiting.length ? v.waiting.map(tidText).join('、') : 'なし'}</span></p>`;
 }
 
 /** メモリのダンプ */
@@ -165,7 +181,11 @@ export function memoryHTML(s, addr, unit) {
   const cell = v => (v === null ? (unit === 4 ? '--------' : '--') : unit === 4 ? hex8(v) : hex(v, 2));
   const body = rows.map(r => {
     const label = s.labelAt.get(r.addr);
-    return `<tr><td class="a">${hex8(r.addr)}</td>${r.values.map(v => `<td>${cell(v)}</td>`).join('')}<td class="hint">${label ? esc(label) : ''}</td></tr>`;
+    const cells = r.values.map((v, k) => {
+      const a = (r.addr + k * unit) >>> 0;
+      return `<td class="${chg(v !== null && s.isWritten(a, unit)).trim()}">${cell(v)}</td>`;
+    }).join('');
+    return `<tr><td class="a">${hex8(r.addr)}</td>${cells}<td class="hint">${label ? esc(label) : ''}</td></tr>`;
   }).join('');
   return `<table class="memtable"><tbody>${body}</tbody></table>`;
 }

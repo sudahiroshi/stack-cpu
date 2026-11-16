@@ -114,7 +114,70 @@ export class Session {
     this.dbg.breakpoints = this.breakpoints;
     this.dbg.exceptionBreaks = this.exceptionBreaks;
     this.dbg.watches = this.watches;
+    this.#trackWrites();
+    this.prev = new Map();
     this.#buildIndex();
+  }
+
+  // ---------------------------------------------------------------- 変わった箇所の強調
+  /** 書き込みを覚える語の数の上限（実行を長く続けたとき、覚えるのをやめる） */
+  static WRITTEN_LIMIT = 8192;
+
+  /** CPUのメモリへの書き込みを覚える（デバッガの書き込みのブレークポイントと両立させる） */
+  #trackWrites() {
+    const mem = this.m.mem;
+    const dbgHook = mem.onWrite;
+    this.written = new Map();   // 語の番地 → 書き込まれたバイトのビット（bit0＝番地+0 … bit3＝番地+3）
+    mem.onWrite = (addr, size, ctx) => {
+      dbgHook?.(addr, size, ctx);
+      const w = (addr & ~3) >>> 0;
+      const old = this.written.get(w);
+      if (old === undefined && this.written.size >= Session.WRITTEN_LIMIT) return;
+      this.written.set(w, (old ?? 0) | (size === 4 ? 0xf : 1 << (addr & 3)));
+    };
+  }
+
+  /**
+   * いまの状態を「直前」として覚える（ステップ・実行を始めるときに呼ぶ）。
+   * 以後、表示はこれと比べて変わった箇所を強調する。メモリは、これ以後に書き込まれた番地を強調する。
+   */
+  takeSnapshot() {
+    this.prev = new Map();
+    for (const th of this.threads) {
+      this.prev.set(th.tid, {
+        ds: th.dataStack(), rs: th.returnStack(),
+        summary: this.threadSummary(th),
+        csr: this.csrList(th).map(c => c.value),
+        mbox: th.mbox.slice(), waiting: th.sendQueue.slice(),
+        up: th.up >>> 0, evpend: this.m.pendingEvents(th) >>> 0, lastException: th.lastException,
+      });
+    }
+    this.written.clear();
+  }
+
+  /** 語（unit＝4）・バイト（unit＝1）が、覚えてから書き込まれたか */
+  isWritten(addr, unit = 4) {
+    const bits = this.written.get((addr & ~3) >>> 0);
+    if (!bits) return false;
+    return unit === 4 ? true : (bits & (1 << (addr & 3))) !== 0;
+  }
+
+  /**
+   * メールボックスで、覚えてから届いた語の数（FIFOの後ろの何語が新しいか）。
+   * 前から取り出された分を飛ばして、前の中身の残りがいまの先頭と一致するところを探す。
+   */
+  mailboxArrived(th) {
+    const prev = this.prev.get(th.tid)?.mbox;
+    const cur = th.mbox;
+    if (!prev) return 0;
+    for (let k = 0; k <= prev.length; k++) {
+      const rest = prev.length - k;
+      if (rest > cur.length) continue;
+      let same = true;
+      for (let i = 0; i < rest; i++) if (prev[k + i] !== cur[i]) { same = false; break; }
+      if (same) return cur.length - rest;
+    }
+    return cur.length;
   }
 
   /** 番地 → ラベル、番地 → 配置の情報 */

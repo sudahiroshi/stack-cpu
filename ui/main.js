@@ -31,7 +31,6 @@ const ui = {
   slowRate: saved.slowRate ?? 10,
   scale: saved.scale ?? 'fit',
   offsets: new Map(),   // 詳細の列ごとの逆アセンブルのずらし（語の数。0なら実行中の語を追う）
-  prev: new Map(),      // ステップ・実行を始めたときのスタック（変わった値の強調用）
   running: false,
   reason: null,
   lagging: false,
@@ -69,7 +68,6 @@ function afterRebuild() {
   m.uart.onTx = () => { uartDirty = true; };
   m.gpio.joy = joyState;
   ui.offsets.clear();
-  ui.prev.clear();
   ui.reason = null;
   bpDirty = true;
   if (!session.m.findThread(ui.selected)) ui.selected = 0;
@@ -84,9 +82,9 @@ function log(text) {
 }
 
 // ---------------------------------------------------------------- 実行の制御
-function snapshotStacks() {
-  ui.prev.clear();
-  for (const th of session.threads) ui.prev.set(th.tid, { ds: th.dataStack(), rs: th.returnStack() });
+/** ステップ・実行を始めたときの状態を覚える（変わった箇所の強調用。ui/views.js） */
+function snapshot() {
+  session.takeSnapshot();
 }
 
 function stopWith(r) {
@@ -100,7 +98,7 @@ function stopWith(r) {
 
 function toggleRun() {
   if (ui.running) { stopWith({ type: 'pause' }); return; }
-  snapshotStacks();
+  snapshot();
   ui.running = true;
   ui.reason = null;
   lastFrame = performance.now();
@@ -111,7 +109,7 @@ function toggleRun() {
 
 function step(kind) {
   if (ui.running) return;
-  snapshotStacks();
+  snapshot();
   const d = session.dbg;
   const tid = ui.selected;
   const r = kind === 'inst' ? d.stepInstruction(tid)
@@ -157,6 +155,7 @@ function frame(now) {
     const k = Math.floor(budget);
     if (k > 0) {
       budget -= k;
+      snapshot();   // ゆっくりのときは、直前に実行した命令で変わった箇所を強調する
       r = d.run({ maxIssues: k, maxCycles: 10_000_000 });
     }
   }
