@@ -5,10 +5,13 @@
 //     止めたサイクルの残り（20Kでは後のコア）は、続けるときに実行するので、止めない実行と結果は同じになる。
 //   - 例外：選んだ番号の例外の入口の処理を終えたサイクルの終わりで止める（Machine.exceptionHook）。
 //   - メモリへの書き込み：指定した4バイトに書き込んだサイクルの終わりで止める（Memory.onWrite）。
+//   - メッセージの到着：指定したスレッドのメールボックスにメッセージが届いたサイクルの終わりで止める（Machine.mailHook）。
+//     受け取る側はまだ RECV していないので、メールボックスの中身を見られる。
 // 止まった後に続けると、止まった語からそのまま進む（同じブレークポイントですぐに止まり直さない）。
 //
 // 止まった理由：
 //   { type: 'breakpoint', tid, addr }   { type: 'exception', tid, exc }   { type: 'watch', tid, addr, writeAddr, size }
+//   { type: 'mailbox', tid, src, header }  tid のメールボックスに src からメッセージが届いた
 //   { type: 'step', tid? }  ステップの終わり     { type: 'stopped' }  すべてのスレッドが止まった
 //   { type: 'limit' }       サイクル数・命令数の上限    { type: 'timeout', tid }  ステップが終わらない（上限で打ち切り）
 import { OP } from './isa.js';
@@ -27,6 +30,8 @@ export class Debugger {
     this.exceptionBreaks = new Set();
     /** 書き込みを見張る番地（4バイト単位。下位2bitは0にする） */
     this.watches = new Set();
+    /** メッセージが届いたら止めるスレッド（受け取る側のtid） */
+    this.mailBreaks = new Set();
     /** ステップが終わらないときに打ち切るサイクル数 */
     this.stepLimit = 10_000_000;
     this.pending = null;   // 例外・書き込みで止める理由（サイクルの終わりで止める）
@@ -37,6 +42,9 @@ export class Debugger {
       if (this.exceptionBreaks.has(exc)) this.pending ??= { type: 'exception', tid: th.tid, exc };
     };
     machine.mem.onWrite = (addr, size, ctx) => this.#checkWrite(addr, size, ctx);
+    machine.mailHook = (target, header, from) => {
+      if (this.mailBreaks.has(target.tid)) this.pending ??= { type: 'mailbox', tid: target.tid, src: from.tid, header };
+    };
   }
 
   /** マシンをリセットしたときに呼ぶ（止まっていた状態を忘れる） */
@@ -58,6 +66,13 @@ export class Debugger {
     addr = (addr & ~3) >>> 0;
     if (this.watches.has(addr)) { this.watches.delete(addr); return false; }
     this.watches.add(addr);
+    return true;
+  }
+
+  /** メッセージの到着で止めるスレッドを置く・外す。置いたら true */
+  toggleMailBreak(tid) {
+    if (this.mailBreaks.has(tid)) { this.mailBreaks.delete(tid); return false; }
+    this.mailBreaks.add(tid);
     return true;
   }
 

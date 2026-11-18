@@ -334,6 +334,14 @@ function bindPanels() {
     applySettingsToControls();
     render();
   });
+  // メールボックスのタブ：「届いたら止める」（表示を作り直しても取りこぼさないよう、押した瞬間に受ける）
+  onPress($('mbox'), e => {
+    const btn = e.target.closest('[data-act="mail-break"]');
+    if (!btn) return;
+    session.dbg.toggleMailBreak(Number(btn.dataset.tid));
+    bpDirty = true;
+    render();
+  });
   $('mem-addr').onchange = e => {
     const a = Session.parseAddress(e.target.value);
     if (a !== null) ui.memAddr = a;
@@ -356,6 +364,12 @@ function bindPanels() {
     render();
   };
   $('bp').onchange = e => {
+    if (e.target.dataset.act === 'mail') {
+      const tid = Number(e.target.dataset.tid);
+      if (e.target.checked) session.mailBreaks.add(tid); else session.mailBreaks.delete(tid);
+      render();
+      return;
+    }
     if (e.target.dataset.act !== 'exc') return;
     const n = Number(e.target.dataset.exc);
     if (e.target.checked) session.exceptionBreaks.add(n); else session.exceptionBreaks.delete(n);

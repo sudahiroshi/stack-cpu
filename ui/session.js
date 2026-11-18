@@ -76,6 +76,7 @@ export class Session {
     this.breakpoints = new Set();
     this.exceptionBreaks = new Set();
     this.watches = new Set();
+    this.mailBreaks = new Set();
     this.rebuild();
   }
 
@@ -114,6 +115,7 @@ export class Session {
     this.dbg.breakpoints = this.breakpoints;
     this.dbg.exceptionBreaks = this.exceptionBreaks;
     this.dbg.watches = this.watches;
+    this.dbg.mailBreaks = this.mailBreaks;
     this.#trackWrites();
     this.prev = new Map();
     this.#buildIndex();

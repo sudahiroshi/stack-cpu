@@ -28,7 +28,7 @@ export function threadListHTML(s, ui) {
       const pinned = ui.pinned.has(t.tid);
       rows.push(`<tr class="${cls}" data-tid="${t.tid}">
         <td><button class="pin ${pinned ? 'on' : ''}" data-act="pin" data-tid="${t.tid}" title="詳細の列に固定">${pinned ? '★' : '☆'}</button></td>
-        <td class="mono">${tidText(t.tid)}</td>
+        <td class="mono">${tidText(t.tid)}${s.mailBreaks.has(t.tid) ? '<span class="mailbp" title="メッセージが届いたら止める">✉</span>' : ''}</td>
         <td class="${chg(p && p.state !== t.state).trim()}"><span class="st st-${t.state}" title="${t.mode}モード">${esc(t.stateName)}</span>${t.mode === '一般' ? '<span class="umode" title="一般モード">U</span>' : ''}</td>
         <td class="mono">${hex8(t.pc)}:${t.slot}</td>
         <td class="mono${chg(p && p.depth !== t.depth)}">${t.depth}</td>
@@ -177,7 +177,10 @@ export function mboxHTML(s, th) {
       : `<tr class="${cls}"><td class="mono">${hex8(i.word)}</td><td class="hint">本文</td></tr>`;
   }).join('');
   const waitChanged = p && p.waiting.join() !== v.waiting.join();
-  return `<p class="hint">tid ${tidText(th.tid)} の受信FIFO（<span class="${chg(p && p.mbox.length !== th.mbox.length).trim()}">${th.mbox.length}</span>/${s.m.cfg.mboxDepth}語）</p>
+  const on = s.mailBreaks.has(th.tid);
+  const toggle = `<button class="toggle mailbreak ${on ? 'on' : ''}" data-act="mail-break" data-tid="${th.tid}"
+      title="このスレッドのメールボックスにメッセージが届いたら、実行を止める（ブレークポイントと同じ）">${on ? '● ' : ''}届いたら止める</button>`;
+  return `<div class="screen-tools">${toggle}</div><p class="hint">tid ${tidText(th.tid)} の受信FIFO（<span class="${chg(p && p.mbox.length !== th.mbox.length).trim()}">${th.mbox.length}</span>/${s.m.cfg.mboxDepth}語）</p>
     ${rows ? `<table><tbody>${rows}</tbody></table>` : '<p class="hint">（空）</p>'}
     <p class="hint">このスレッドへの送信を待っているスレッド：<span class="${chg(waitChanged).trim()}">${v.waiting.length ? v.waiting.map(tidText).join('、') : 'なし'}</span></p>`;
 }
@@ -209,6 +212,8 @@ export function bpHTML(s) {
       <div class="row"><input id="bp-new" placeholder="番地（16進）" size="10"><button data-act="bp-add">追加</button></div></div>
     <div class="bp-section"><h2>メモリへの書き込み（4バイト単位）</h2>${watchRows}
       <div class="row"><input id="watch-new" placeholder="番地（16進）" size="10"><button data-act="watch-add">追加</button></div></div>
+    <div class="bp-section"><h2>メッセージが届いたら止める（受け取るスレッド）</h2><div class="exc-grid">${
+      s.threads.map(th => `<label><input type="checkbox" data-act="mail" data-tid="${th.tid}" ${s.mailBreaks.has(th.tid) ? 'checked' : ''}> tid ${tidText(th.tid)}</label>`).join('')}</div></div>
     <div class="bp-section"><h2>例外が起きたら止める</h2><div class="exc-grid">${exc}</div></div>`;
 }
 
@@ -218,6 +223,7 @@ export function reasonText(r) {
   switch (r.type) {
     case 'breakpoint': return `ブレークポイント ${hex8(r.addr)}（tid ${tidText(r.tid)}）`;
     case 'exception': return `例外 ${r.exc} ${EXC_NAMES[r.exc] ?? ''}（tid ${tidText(r.tid)}）`;
+    case 'mailbox': return `メッセージの到着：tid ${tidText(r.tid)} ← tid ${tidText(r.src)}（tag ${hex((r.header >>> 8) & 0xffff, 4)}、${r.header & 0xf}語）`;
     case 'watch': return `書き込み ${hex8(r.writeAddr)}（${r.size}バイト、tid ${tidText(r.tid)}）`;
     case 'step': return 'ステップの終わり';
     case 'stopped': return 'すべてのスレッドが停止';

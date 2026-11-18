@@ -360,7 +360,9 @@ function executeSys(m, th, inst, ctx) {
       const data = [];
       for (let k = 0; k < n; k++) data.unshift(th.pop());
       // ヘッダ：送信元tid（31〜24）、tag（23〜8）、予備0（7〜4）、n（3〜0）（10.3節）
-      target.mbox.push(((th.tid << 24) | (tag << 8) | n) >>> 0, ...data);
+      const header = ((th.tid << 24) | (tag << 8) | n) >>> 0;
+      target.mbox.push(header, ...data);
+      m.mailHook?.(target, header, th);
       if (trying) th.push(TRUE);
       return NEXT;
     }

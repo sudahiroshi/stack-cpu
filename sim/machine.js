@@ -73,6 +73,8 @@ export class Machine {
     this.hostInput = false;
     /** デバッガのフック：例外の入口の処理（または二重例外での停止）のあとに呼ぶ（th, 例外番号） */
     this.exceptionHook = null;
+    /** デバッガのフック：メールボックスにメッセージが届いたときに呼ぶ（受け取るスレッド、ヘッダ、送ったスレッド） */
+    this.mailHook = null;
     this.reset();
   }
 

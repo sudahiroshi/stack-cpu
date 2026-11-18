@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import * as V from '../ui/views.js';
 import { Session, parseProgram, parseReadmemh, hex8, DEFAULT_DIRECT_UP } from '../ui/session.js';
 import { toReadmemh } from '../asm/assembler.js';
 import { THREAD_STATE } from '../sim/devices/registers.js';
@@ -138,4 +139,41 @@ test('parseAddress と hex8', () => {
   assert.equal(Session.parseAddress('xyz'), null);
   assert.equal(Session.parseAddress('123456789'), null);
   assert.equal(hex8(255), '000000FF');
+});
+
+test('メッセージの到着で止める：指定したスレッドに届いたサイクルの終わり（SENDM・SENDM?）', () => {
+  const s = new Session(ROM_SRC);
+  s.load(parseProgram('t.asm', [
+    'start: PUSHQ #5', 'PUSH #$7001', 'PUSHQ #1', 'SEND 1',        // tid 1 へ（止めない）
+    'PUSHQ #6', 'PUSH #$7002', 'PUSHQ #2', 'SEND 1',               // tid 2 へ（止める）
+    'PUSHQ #7', 'PUSH #$7003', 'PUSHQ #2', 'TRYSEND 1', 'POP',     // tid 2 へ、SENDM?
+    'l: BRA l',
+  ].join('\n')), { boot: 'direct' });
+  s.mailBreaks.add(2);
+  let r = s.dbg.run({ maxCycles: 100_000 });
+  assert.deepEqual(r, { type: 'mailbox', tid: 2, src: 0, header: 0x00700201 });
+  assert.deepEqual(s.m.thread(2).mbox, [0x00700201, 6]);      // まだ RECV していない
+  assert.equal(V.reasonText(r), 'メッセージの到着：tid 02 ← tid 00（tag 7002、1語）');
+  r = s.dbg.run({ maxCycles: 100_000 });                       // 続けると、次の到着で止まる
+  assert.equal(r.type, 'mailbox');
+  assert.equal(r.header, 0x00700301);
+  r = s.dbg.run({ maxCycles: 100_000 });
+  assert.equal(r.type, 'limit');                               // もう届かない
+  assert.equal(s.dbg.toggleMailBreak(2), false);               // 外す
+  assert.equal(s.mailBreaks.has(2), false);
+  // 作り直しても設定を引き継ぐ
+  s.mailBreaks.add(1);
+  s.rebuild();
+  assert.equal(s.dbg.run({ maxCycles: 100_000 }).tid, 1);
+});
+
+test('メッセージの到着で止める：表示（メールボックスのボタン、BPの一覧、一覧の印）', () => {
+  const s = new Session(ROM_SRC);
+  const u = { selected: 0, pinned: new Set(), style: 'reg', offsets: new Map() };
+  assert.match(V.mboxHTML(s, s.m.thread(1)), /data-act="mail-break" data-tid="1"/);
+  assert.doesNotMatch(V.threadListHTML(s, u), /mailbp/);
+  s.mailBreaks.add(1);
+  assert.match(V.mboxHTML(s, s.m.thread(1)), /toggle mailbreak on/);
+  assert.match(V.bpHTML(s), /data-act="mail" data-tid="1" checked/);
+  assert.match(V.threadListHTML(s, u), /01<span class="mailbp"/);
 });

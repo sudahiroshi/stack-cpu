@@ -168,6 +168,8 @@ canvas#screen:focus { box-shadow: 0 0 0 2px var(--accent); }
 .memtable td { font-family: var(--mono); font-size: 12px; padding: 1px 6px; }
 .memtable td.a { color: var(--muted); }
 .bp-section { margin-bottom: 12px; }
+.mailbp { margin-left: 3px; font-size: 10px; color: var(--bp); }
+button.toggle.mailbreak.on { background: var(--bp); border-color: var(--bp); }
 .bp-section .row { display: flex; gap: 6px; align-items: center; margin: 3px 0; }
 .exc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; font-size: 12px; }
 
