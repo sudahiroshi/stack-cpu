@@ -1,5 +1,5 @@
 // 段階6：ブートROM（起動、idleループ、例外のハンドラ、SYSCALL、拡張命令のソフトによる実行、モニタ）とサンプルのテスト
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Machine } from '../sim/machine.js';
@@ -396,4 +396,70 @@ test('examples/08_vram_random.asm：1秒に1回、ランダムな位置・色で
   runTo(30.5);
   assert.equal(found().length, 1);                     // 30回出した後に消して、31回目だけ
   assert.equal(m.thread(0).lastException, null);
+});
+
+// ---------------------------------------------------------------- examples/09_clock.asm
+
+describe('examples/09_clock.asm：アナログ時計', () => {
+  const start = () => {
+    const m = new Machine('9K');
+    m.load(ROM.origin, ROM.bytes);
+    m.load(ORG, assemble(example('09_clock.asm'), { origin: ORG }).bytes);
+    const sec = m.cfg.clockMHz * 1_000_000;
+    let t = 0;
+    const wait = s => { t += s; m.runUntilStop(Math.round(t * sec) - m.cycle); };   // 待っている間は早送りされる
+    const time = () => m.video.textRow(29).slice(1, 9);
+    const at = (row, col) => ({ ch: String.fromCharCode(m.video.vram[2 * (row * 80 + col)]), attr: m.video.vram[2 * (row * 80 + col) + 1] });
+    const type = (text, s = 0.5) => { for (const c of text) { m.uart.receive(c); wait(0.01); } wait(s); };
+    return { m, wait, time, at, type };
+  };
+
+  test('起動した瞬間を 00:00:00 として1秒ずつ進む。文字盤と針を描く', () => {
+    const c = start();
+    c.wait(0.5);
+    assert.equal(c.time(), '00:00:00');
+    assert.match(c.m.uart.outputText, /Analog clock: type HHMM/);
+    assert.equal(c.m.video.textRow(2).trim(), 'o            12             o');   // 12の数字と時の目盛り
+    assert.deepEqual(c.at(14, 40), { ch: 'O', attr: 0x0F });                     // 中心
+    assert.deepEqual(c.at(5, 40), { ch: '.', attr: 0x0C });                      // 0秒：秒針は真上（一番上に描く）
+    c.wait(15);
+    assert.equal(c.time(), '00:00:15');
+    assert.deepEqual(c.at(14, 50), { ch: '.', attr: 0x0C });                     // 15秒：秒針は真横（3時の向き）
+    assert.deepEqual(c.at(5, 40), { ch: '*', attr: 0x0B });                      // 長針（0分）が見える
+    assert.equal(c.m.thread(0).state, S.WAIT);
+  });
+
+  test('UARTから4桁（HHMM）を打つと、その時刻の0秒から数え直す', () => {
+    const c = start();
+    c.wait(3.3);
+    c.type('1047');
+    assert.equal(c.time(), '10:47:00');
+    assert.match(c.m.uart.outputText, /1047 OK\r\n$/);
+    assert.deepEqual(c.at(14, 39), { ch: '*', attr: 0x0B });                     // 長針：47分は9時の少し上
+    assert.equal(c.at(10, 33).ch, '#');                                          // 短針：10時と11時の間
+    c.wait(2);
+    assert.equal(c.time(), '10:47:02');
+  });
+
+  test('ありえない時刻は無視する。数字以外のキーで打ちかけを捨てる。23:59:59 の次は 00:00:00', () => {
+    const c = start();
+    c.wait(0.5);
+    c.type('2400');
+    c.type('1260');
+    assert.equal(c.time(), '00:00:01');
+    assert.match(c.m.uart.outputText, /2400 \?\r\n1260 \?\r\n$/);
+    c.type('12\r2359');                                                          // 12 は捨てて 2359
+    assert.equal(c.time(), '23:59:00');
+    c.wait(60);
+    assert.equal(c.time(), '00:00:00');
+  });
+
+  test('除算器のない構成でも動く（U/MOD はブートROMがソフトで実行する）', () => {
+    const m = new Machine(makeConfig('9K', { features: 0 }));
+    m.load(ROM.origin, ROM.bytes);
+    m.load(ORG, assemble(example('09_clock.asm'), { origin: ORG }).bytes);
+    m.uart.receive('0101');
+    m.runUntilStop(Math.round(1.5 * m.cfg.clockMHz * 1_000_000));
+    assert.equal(m.video.textRow(29).slice(1, 9), '01:01:01');
+  });
 });
