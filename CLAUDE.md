@@ -48,7 +48,7 @@ asm/         アセンブラ（DOM非依存）
   disasm.js    逆アセンブラ
 ui/          ブラウザのUI（index.html、style.css、main.js＝DOMの操作、session.js・views.js＝DOM非依存の状態とHTMLの組み立て）
 test/        テスト（node --test）
-examples/    サンプルプログラム（.asm）
+examples/    サンプルプログラム（.asm）と、その説明（README.md）
 rom/         ブートROMのソース
 tools/       コマンドラインツール（asm.js、serve.js）
 ```
