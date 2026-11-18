@@ -463,3 +463,74 @@ describe('examples/09_clock.asm：アナログ時計', () => {
     assert.equal(m.video.textRow(29).slice(1, 9), '01:01:01');
   });
 });
+
+// ---------------------------------------------------------------- examples/10_clock_mt.asm
+
+describe('examples/10_clock_mt.asm：3つのスレッドで動くアナログ時計とデジタル時計', () => {
+  const start = (config = '9K') => {
+    const m = new Machine(config);
+    m.load(ROM.origin, ROM.bytes);
+    m.load(ORG, assemble(example('10_clock_mt.asm'), { origin: ORG }).bytes);
+    const sec = m.cfg.clockMHz * 1_000_000;
+    let t = 0;
+    const wait = s => { t += s; m.runUntilStop(Math.round(t * sec) - m.cycle); };
+    const at = (row, col) => ({ ch: String.fromCharCode(m.video.vram[2 * (row * 80 + col)]), attr: m.video.vram[2 * (row * 80 + col) + 1] });
+    // 左上のデジタル時計（1〜5行、1〜17桁）を、点（背景が明るい緑）＝'#' で読む
+    const digits = () => [1, 2, 3, 4, 5].map(r => {
+      let s = '';
+      for (let c = 1; c <= 17; c++) s += at(r, c).attr === 0xA0 ? '#' : '.';
+      return s;
+    });
+    const type = text => { for (const c of text) { m.uart.receive(c); wait(0.01); } wait(0.5); };
+    return { m, wait, at, digits, type };
+  };
+
+  test('tid 0 が tid 1・2 を起動する。tid 1 は文字盤と針、tid 2 は左上に 00:00 を描く', () => {
+    const c = start();
+    c.wait(0.5);
+    assert.equal(c.m.video.textRow(2).trim(), 'o            12             o');
+    assert.deepEqual(c.at(14, 40), { ch: 'O', attr: 0x0F });
+    assert.deepEqual(c.at(5, 40), { ch: '.', attr: 0x0C });                    // 0秒の秒針
+    assert.deepEqual(c.digits(), [
+      '###.###...###.###',
+      '#.#.#.#.#.#.#.#.#',
+      '#.#.#.#...#.#.#.#',
+      '#.#.#.#.#.#.#.#.#',
+      '###.###...###.###',
+    ]);                                                                        // 00:00（0秒はコロンが点く）
+    assert.match(c.m.video.textRow(29), /Type HHMM on UART/);
+    assert.equal(c.m.thread(0).state, S.WAIT);                                 // タイマとUARTを待つ
+    assert.equal(c.m.thread(1).state, S.RECV);                                 // 時刻のメッセージを待つ
+    assert.equal(c.m.thread(2).state, S.RECV);
+    c.wait(1);
+    assert.equal(c.digits()[1], '#.#.#.#...#.#.#.#');                          // 1秒：コロンが消える
+    assert.deepEqual(c.at(5, 42), { ch: '.', attr: 0x0C });                    // 秒針が進む
+  });
+
+  test('UARTから4桁を打つと、両方の時計がその時刻になる。ありえない時刻は無視する', () => {
+    const c = start();
+    c.wait(3.3);
+    c.type('2400');
+    c.type('1047');
+    assert.match(c.m.uart.outputText, /2400 \?\r\n1047 OK\r\n$/);
+    assert.deepEqual(c.digits(), [
+      '.#..###...#.#.###',
+      '##..#.#.#.#.#...#',
+      '.#..#.#...###...#',
+      '.#..#.#.#...#...#',
+      '###.###.....#...#',
+    ]);                                                                        // 10:47
+    assert.deepEqual(c.at(14, 39), { ch: '*', attr: 0x0B });                   // 長針：47分
+    assert.equal(c.at(10, 33).ch, '#');                                        // 短針：10時と11時の間
+  });
+
+  test('20Kでも動く', () => {
+    const c = start('20K');
+    c.wait(0.5);
+    c.type('2359');
+    c.wait(60);
+    assert.equal(c.digits()[0], '###.###...###.###');                          // 00:00 に戻る
+    assert.equal(c.m.thread(1).lastException, null);
+    assert.equal(c.m.thread(2).lastException, null);
+  });
+});
