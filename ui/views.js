@@ -42,6 +42,13 @@ export function threadListHTML(s, ui) {
     <tbody>${rows.join('')}</tbody></table>`;
 }
 
+/** ツールバーの「スレッド」の選択肢（20Kはコアごとにまとめる） */
+export function threadOptionsHTML(s, ui) {
+  const opt = th => `<option value="${th.tid}"${th.tid === ui.selected ? ' selected' : ''}>tid ${tidText(th.tid)}</option>`;
+  if (s.m.cfg.ncores === 1) return s.m.cores[0].threads.map(opt).join('');
+  return s.m.cores.map(core => `<optgroup label="コア${core.id}">${core.threads.map(opt).join('')}</optgroup>`).join('');
+}
+
 /** 逆アセンブルの行（詳細の列と格子で共通） */
 function disasmRowsHTML(rows) {
   return rows.map(r => {

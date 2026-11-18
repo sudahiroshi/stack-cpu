@@ -40,6 +40,20 @@ test('詳細の列：選んだスレッドと固定したスレッド。逆ア�
   assert.match(html, /データスタック/);
 });
 
+test('ツールバーのスレッドの選択肢：選んでいるスレッドに selected。20Kはコアごと', () => {
+  const s = new Session(ROM_SRC);
+  const u = ui();
+  u.selected = 3;
+  let html = V.threadOptionsHTML(s, u);
+  assert.equal((html.match(/<option/g) ?? []).length, 8);
+  assert.match(html, /<option value="3" selected>tid 03<\/option>/);
+  assert.doesNotMatch(html, /optgroup/);
+  s.setConfig('20K');
+  html = V.threadOptionsHTML(s, u);
+  assert.equal((html.match(/<option/g) ?? []).length, 16);
+  assert.match(html, /<optgroup label="コア1">/);
+});
+
 test('格子：全スレッドの枠', () => {
   const s = new Session(ROM_SRC);
   assert.equal((V.gridHTML(s, ui()).match(/class="card/g) ?? []).length, 8);

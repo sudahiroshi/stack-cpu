@@ -247,6 +247,7 @@ function bindToolbar() {
   $('sel-speed').onchange = e => { ui.speed = e.target.value; budget = 0; applySettingsToControls(); saveSettings(); };
   $('slow-rate').onchange = e => { ui.slowRate = Math.max(1, Math.min(1000, Number(e.target.value) || 10)); saveSettings(); };
   $('sel-style').onchange = e => { ui.style = e.target.value; saveSettings(); render(); };
+  $('sel-thread').onchange = e => selectThread(Number(e.target.value));
   $('btn-view-list').onclick = () => { ui.view = 'list'; saveSettings(); applySettingsToControls(); render(); };
   $('btn-view-grid').onclick = () => { ui.view = 'grid'; saveSettings(); applySettingsToControls(); render(); };
   window.addEventListener('keydown', e => {
@@ -292,7 +293,10 @@ function selectThread(tid) {
 }
 
 function bindPanels() {
-  $('thread-list').onclick = e => {
+  // 一覧・詳細・格子は、実行中は描画のたびに作り直すので、click（押した要素と離した要素が同じときだけ起きる）は
+  // 取りこぼす。押した瞬間に起きる pointerdown で受ける。
+  const onPress = (el, fn) => el.addEventListener('pointerdown', e => { if (e.button === 0) fn(e); });
+  onPress($('thread-list'), e => {
     const pin = e.target.closest('[data-act="pin"]');
     if (pin) {
       const tid = Number(pin.dataset.tid);
@@ -304,15 +308,15 @@ function bindPanels() {
     }
     const row = e.target.closest('tr[data-tid]');
     if (row) selectThread(Number(row.dataset.tid));
-  };
-  $('details').onclick = e => {
+  });
+  onPress($('details'), e => {
     const act = e.target.closest('[data-act]');
     if (act?.dataset.act === 'bp') { session.dbg.toggleBreakpoint(Number(act.dataset.addr)); bpDirty = true; render(); return; }
     if (act?.dataset.act === 'follow') { ui.offsets.delete(Number(act.dataset.tid)); render(); return; }
     if (act?.dataset.act === 'unpin') { ui.pinned.delete(Number(act.dataset.tid)); render(); return; }
     const col = e.target.closest('.col[data-tid]');
     if (col && Number(col.dataset.tid) !== ui.selected) selectThread(Number(col.dataset.tid));
-  };
+  });
   $('details').addEventListener('wheel', e => {
     const dis = e.target.closest('.disasm[data-tid]');
     if (!dis) return;
@@ -321,7 +325,7 @@ function bindPanels() {
     ui.offsets.set(tid, (ui.offsets.get(tid) ?? 0) + Math.sign(e.deltaY) * 2);
     render();
   }, { passive: false });
-  $('grid').onclick = e => {
+  onPress($('grid'), e => {
     const card = e.target.closest('.card[data-tid]');
     if (!card) return;
     ui.selected = Number(card.dataset.tid);
@@ -329,7 +333,7 @@ function bindPanels() {
     saveSettings();
     applySettingsToControls();
     render();
-  };
+  });
   $('mem-addr').onchange = e => {
     const a = Session.parseAddress(e.target.value);
     if (a !== null) ui.memAddr = a;
@@ -421,6 +425,14 @@ function drawScreen() {
 // ---------------------------------------------------------------- 描画
 const visible = (group, tab) => !document.querySelector(`.tabs[data-tabs="${group}"] .tab-body[data-tab="${tab}"]`).hidden;
 
+/** 中身が変わったときだけ書き換える（変わらない部分の選択・ホバー・スクロールを保つ） */
+const htmlCache = new WeakMap();
+function setHTML(el, html) {
+  if (htmlCache.get(el) === html) return;
+  htmlCache.set(el, html);
+  el.innerHTML = html;
+}
+
 function render() {
   const m = session.m;
   // ツールバーと状態
@@ -439,10 +451,13 @@ function render() {
     : (ui.reason?.type === 'pause' ? '一時停止' : V.reasonText(ui.reason));
 
   // スレッド
-  $('thread-list').innerHTML = V.threadListHTML(session, ui);
+  const sel = $('sel-thread');
+  setHTML(sel, V.threadOptionsHTML(session, ui));
+  if (document.activeElement !== sel) sel.value = String(ui.selected);
+  setHTML($('thread-list'), V.threadListHTML(session, ui));
   ui.lines = Math.max(10, Math.min(60, Math.floor((window.innerHeight - 380) / 18)));   // 逆アセンブルの行数
-  if (ui.view === 'list') $('details').innerHTML = V.detailsHTML(session, ui);
-  else $('grid').innerHTML = V.gridHTML(session, ui);
+  if (ui.view === 'list') setHTML($('details'), V.detailsHTML(session, ui));
+  else setHTML($('grid'), V.gridHTML(session, ui));
 
   // 右のタブ
   if (visible('right', 'screen')) drawScreen();
@@ -461,9 +476,9 @@ function render() {
 
   // 下のタブ
   const th = m.findThread(ui.selected) ?? m.thread(0);
-  if (visible('bottom', 'memory')) $('memory').innerHTML = V.memoryHTML(session, ui.memAddr, ui.memUnit);
-  if (visible('bottom', 'csr')) $('csr').innerHTML = V.csrHTML(session, th);
-  if (visible('bottom', 'mbox')) $('mbox').innerHTML = V.mboxHTML(session, th);
+  if (visible('bottom', 'memory')) setHTML($('memory'), V.memoryHTML(session, ui.memAddr, ui.memUnit));
+  if (visible('bottom', 'csr')) setHTML($('csr'), V.csrHTML(session, th));
+  if (visible('bottom', 'mbox')) setHTML($('mbox'), V.mboxHTML(session, th));
   // BPタブは、設定が変わったときとタブを開いたときだけ描き直す（入力中の欄を消さないように）
   if (visible('bottom', 'bp') && bpDirty && !$('bp').contains(document.activeElement)) {
     $('bp').innerHTML = V.bpHTML(session);
