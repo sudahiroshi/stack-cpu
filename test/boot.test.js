@@ -358,3 +358,42 @@ test('examples/07_adder.asm：30行を超えたら SCROLL で画面を送り、�
   assert.equal(v.cursor, 11 << 8);
   assert.match(r.out, /\+9 = 360\r\n$/);
 });
+
+// ---------------------------------------------------------------- examples/08_vram_random.asm
+
+test('examples/08_vram_random.asm：1秒に1回、ランダムな位置・色で文字列を出し、30回ごとに画面を消す', () => {
+  const m = new Machine('9K');
+  m.load(ROM.origin, ROM.bytes);
+  m.load(ORG, assemble(example('08_vram_random.asm'), { origin: ORG }).bytes);
+  const sec = m.cfg.clockMHz * 1_000_000;
+  const MSG = 'Example of TEXT VRAM';
+  const found = () => {
+    const out = [];
+    for (let row = 0; row < 30; row++) {
+      const text = m.video.textRow(row);
+      for (let col = text.indexOf(MSG); col >= 0; col = text.indexOf(MSG, col + 1)) {
+        out.push({ row, col, attr: m.video.vram[2 * (row * 80 + col) + 1] });
+      }
+    }
+    return out;
+  };
+  const runTo = s => m.runUntilStop(Math.round(s * sec) - m.cycle);   // 待っている間は早送りされる
+  runTo(0.5);
+  let f = found();
+  assert.equal(f.length, 1);                           // 起動してすぐ1回目
+  assert.ok(f[0].attr >= 1 && f[0].attr <= 15);       // 背景0（黒）、文字色1〜15
+  assert.ok(f[0].col <= 60);                          // 行に収まる
+  runTo(1.5);
+  assert.equal(found().length, 2);                     // 1秒後に2回目
+  runTo(5.5);
+  f = found();
+  assert.equal(f.length, 6);
+  assert.ok(new Set(f.map(x => x.row * 80 + x.col)).size > 1);   // 位置がばらける
+  assert.ok(new Set(f.map(x => x.attr)).size > 1);               // 色がばらける
+  assert.equal(m.thread(0).state, S.WAIT);             // タイマを待っている
+  runTo(29.5);
+  assert.ok(found().length >= 1);
+  runTo(30.5);
+  assert.equal(found().length, 1);                     // 30回出した後に消して、31回目だけ
+  assert.equal(m.thread(0).lastException, null);
+});
